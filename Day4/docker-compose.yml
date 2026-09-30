@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: film-review-db-day4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: film_user
+      POSTGRES_PASSWORD: film_secret_pass
+      POSTGRES_DB: film_review_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_day4:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U film_user -d film_review_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - film-review-net
+
+  init-db:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: film-review-init-db-day4
+    command: ["python", "-m", "app.core.init_db"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - film-review-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: film-review-platform-day4
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
+    depends_on:
+      db:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\")' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - film-review-net
+
+volumes:
+  postgres_data_day4:
+    driver: local
+
+networks:
+  film-review-net:
+    driver: bridge
