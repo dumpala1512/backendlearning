@@ -1,13 +1,9 @@
-from app.services import (
-    film_service,
-    review_service,
-    serialization_service,
-    user_service,
-)
+from app.services.film_service import FilmService
+from app.services.review_service import ReviewService
+from app.services.user_service import UserService
 
 __all__ = [
-    "film_service",
-    "review_service",
-    "serialization_service",
-    "user_service",
+    "FilmService",
+    "ReviewService",
+    "UserService",
 ]

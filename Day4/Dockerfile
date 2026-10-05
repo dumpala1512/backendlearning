@@ -36,8 +36,11 @@ RUN groupadd -g 1001 appgroup && \
 # Copy the pre-built virtualenv with correct ownership (avoids duplicate layer bloat)
 COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 
-# Copy application source code with correct ownership
+# Copy application source code and migrations with correct ownership
 COPY --chown=appuser:appgroup app/ ./app
+COPY --chown=appuser:appgroup alembic/ ./alembic
+COPY --chown=appuser:appgroup alembic.ini ./alembic.ini
+COPY --chown=appuser:appgroup scripts/ ./scripts
 
 # Switch to non-root user
 USER appuser

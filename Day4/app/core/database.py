@@ -28,7 +28,7 @@ class Base(DeclarativeBase):
 # Production-ready async engine using connection string from centralized settings
 engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
-    echo=DEBUG,                                 # generates raw sql queries to stdout useful for local debugging
+    echo=False,                                 # disabled SQL logging to avoid polluting stdout
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,                         # checks if the connection is alive before using it
@@ -46,14 +46,16 @@ async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 async def init_db(target_engine: AsyncEngine = engine) -> None:
     """
-    Utility for local development, experimentation, and testing.
-    Creates missing database tables defined in Base metadata.
-
-    Production Note:
-    - Base.metadata.create_all() creates missing tables only.
-    - It does not manage schema evolution (e.g. adding, dropping, or modifying existing columns).
-    - Production applications should use Alembic migrations instead.
+    Creates missing database tables defined in Base metadata if needed.
     """
+    from app.models import Film, Review, User, Watchlist  # noqa: F401
+
     async with target_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables verified/created via Base.metadata.create_all.")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(init_db())
+

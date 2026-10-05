@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from fastapi import APIRouter, Depends, Response
-from app.core import proj
+from fastapi import APIRouter, Depends
+from app.core import project_config
 from app.dependencies import DatabaseSession, get_db, get_trace_id
-from app.models.common import HealthResponse
+from app.schemas.common import HealthResponse
 
 logger = logging.getLogger("film_review.routers.health")
 
@@ -14,7 +14,6 @@ router = APIRouter(tags=["Health"])
 
 @router.get("/health", response_model=HealthResponse, summary="Service health check")
 async def get_health(
-    response: Response,
     db: DatabaseSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> HealthResponse:
@@ -22,9 +21,7 @@ async def get_health(
     Check the health and availability of the service.
     Demonstrates dependency injection for system status, database connection test, and trace ID.
     """
-    response.headers["X-Trace-Id"] = trace_id
-
-    logger.info(f"[{trace_id}] Health check ok | API {proj.API_VERSION} | DB active={db.is_active}")
+    logger.info(f"[{trace_id}] Health check ok | API {project_config.API_VERSION} | DB active={db.is_active}")
 
     return HealthResponse(
         status="healthy",

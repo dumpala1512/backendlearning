@@ -1,5 +1,5 @@
 from datetime import datetime
-from app.models.base import AppBaseModel
+from app.schemas.base import AppBaseModel
 
 
 class MessageResponse(AppBaseModel):

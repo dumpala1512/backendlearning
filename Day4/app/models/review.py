@@ -1,51 +1,68 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
-from pydantic import Field, model_validator
-from app.models.base import AppBaseModel
+from typing import TYPE_CHECKING
+import uuid
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.film import Film
+    from app.models.user import User
 
 
-class ReviewBase(AppBaseModel):
-    """Reusable base review model enforcing integer rating [1, 10] and min 50 chars."""
+class Review(Base):
+    """SQLAlchemy 2.0 ORM model for Reviews table."""
 
-    film_id: int = Field(..., ge=1)
-    rating: int = Field(..., ge=1, le=10)
-    review: str = Field(..., min_length=50, max_length=5000)
+    __tablename__ = "reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    film_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("films.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    review: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewer_display_name: Mapped[str] = mapped_column(
+        String(50),
+        default="Anonymous Critic",
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Relationship: A Review belongs to one Film
+    film: Mapped[Film] = relationship("Film", back_populates="reviews")
+
+    # Relationship: A Review belongs to one User
+    user: Mapped[User | None] = relationship("User", back_populates="reviews")
+
+    @property
+    def submitted_at(self) -> datetime:
+        """Alias for compatibility with ReviewResponse schema."""
+        return self.created_at
+
+    def __repr__(self) -> str:
+        return f"<Review id={self.id} film_id={self.film_id} rating={self.rating}>"
 
 
-class ReviewCreate(ReviewBase):
-    """Creation model adding optional reviewer display name."""
-
-    reviewer_display_name: str = Field(default="Anonymous Critic", min_length=2, max_length=50)
-    user_id: int | None = Field(default=None, ge=1)
-
-
-class ReviewUpdate(AppBaseModel):
-    """Partial update model."""
-
-    rating: int | None = Field(default=None, ge=1, le=10)
-    review: str | None = Field(default=None, min_length=50)
-
-
-class ReviewResponse(ReviewBase):
-    """Response model extending ReviewBase with id and submission timestamp."""
-
-    id: int
-    user_id: int | None = None
-    reviewer_display_name: str
-    submitted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-# Review domain entity aliases to ReviewResponse (eliminates duplicate model definition)
-Review = ReviewResponse
-
-
-class RatingRangeFilter(AppBaseModel):
-    """Rating bounds demonstrating cross-field validation with @model_validator."""
-
-    min_rating: int = Field(default=1, ge=1, le=10)
-    max_rating: int = Field(default=10, ge=1, le=10)
-
-    @model_validator(mode="after")
-    def validate_rating_bounds(self) -> "RatingRangeFilter":
-        if self.min_rating > self.max_rating:
-            raise ValueError(f"min_rating ({self.min_rating}) cannot exceed max_rating ({self.max_rating})")
-        return self
+ReviewORM = Review

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import proj
-from app.dependencies import DatabaseSession, get_db, get_trace_id
-from app.handlers import review_handler
-from app.models.common import MessageResponse
-from app.models.review import RatingRangeFilter, ReviewCreate, ReviewResponse, ReviewUpdate
+from app.core import project_config
+from app.dependencies import get_db, get_review_service, get_trace_id
+from app.schemas.common import MessageResponse
+from app.schemas.review import RatingRangeFilter, ReviewCreate, ReviewResponse, ReviewUpdate
+from app.services.review_service import ReviewService
 
 logger = logging.getLogger("film_review.routers.reviews")
 
@@ -20,36 +22,53 @@ router = APIRouter(tags=["Reviews"])
     summary="Get reviews for a film",
 )
 async def get_film_reviews(
-    film_id: int,
-    response: Response,
+    film_id: uuid.UUID,
     min_rating: int | None = Query(None, ge=1, le=10, description="Minimum rating filter"),
     max_rating: int | None = Query(None, ge=1, le=10, description="Maximum rating filter"),
-    db: DatabaseSession = Depends(get_db),
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> list[ReviewResponse]:
     """
     Retrieve all reviews for a specific film with optional rating range filtering.
-    Performs real asynchronous database reads through handler and service layers.
+    Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
-    response.headers["X-Trace-Id"] = trace_id
-
     logger.info(
-        f"[{trace_id}] get_film_reviews(film_id={film_id}) | API {proj.API_VERSION} | "
+        f"[{trace_id}] get_film_reviews(film_id={film_id}) | API {project_config.API_VERSION} | "
         f"DB active={db.is_active}"
     )
 
-    rating_filter = None
     if min_rating is not None or max_rating is not None:
-        rating_filter = RatingRangeFilter(
+        RatingRangeFilter(
             min_rating=min_rating if min_rating is not None else 1,
             max_rating=max_rating if max_rating is not None else 10,
         )
 
-    return await review_handler.get_film_reviews(
-        db=db,
+    reviews = await service.list_reviews(
+        session=db,
         film_id=film_id,
-        rating_filter=rating_filter,
+        min_rating=min_rating,
+        max_rating=max_rating,
     )
+    return [ReviewResponse.model_validate(r) for r in reviews]
+
+
+@router.get(
+    "/films/{film_id}/reviews/average",
+    summary="Get average rating for a film",
+)
+async def get_film_average_rating(
+    film_id: uuid.UUID,
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
+    trace_id: str = Depends(get_trace_id),
+) -> dict[str, uuid.UUID | float | None]:
+    """
+    Calculate the average rating for a film.
+    Follows: Route -> Service -> DAO -> AsyncSession -> Database.
+    """
+    avg = await service.average_rating(session=db, film_id=film_id)
+    return {"film_id": film_id, "average_rating": avg}
 
 
 @router.post(
@@ -59,17 +78,15 @@ async def get_film_reviews(
     summary="Add a review for a film",
 )
 async def create_review(
-    film_id: int,
+    film_id: uuid.UUID,
     payload: ReviewCreate,
-    response: Response,
-    db: DatabaseSession = Depends(get_db),
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> ReviewResponse:
     """Submit a review for a film. Enforces min 50 characters and integer rating [1, 10]."""
-    response.headers["X-Trace-Id"] = trace_id
-
     logger.info(
-        f"[{trace_id}] create_review for film_id={film_id} | API {proj.API_VERSION} | "
+        f"[{trace_id}] create_review for film_id={film_id} | API {project_config.API_VERSION} | "
         f"DB active={db.is_active}"
     )
 
@@ -79,11 +96,15 @@ async def create_review(
             detail=f"Route film_id ({film_id}) does not match body film_id ({payload.film_id})",
         )
 
-    return await review_handler.create_review(
-        db=db,
+    review = await service.add_review(
+        session=db,
         film_id=film_id,
-        payload=payload,
+        rating=payload.rating,
+        review=payload.review,
+        reviewer_display_name=payload.reviewer_display_name,
+        user_id=payload.user_id,
     )
+    return ReviewResponse.model_validate(review)
 
 
 @router.post(
@@ -94,23 +115,25 @@ async def create_review(
 )
 async def create_review_direct(
     payload: ReviewCreate,
-    response: Response,
-    db: DatabaseSession = Depends(get_db),
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> ReviewResponse:
     """Submit a review directly via ReviewCreate payload."""
-    response.headers["X-Trace-Id"] = trace_id
-
     logger.info(
         f"[{trace_id}] create_review_direct for film_id={payload.film_id} | "
-        f"API {proj.API_VERSION} | DB active={db.is_active}"
+        f"API {project_config.API_VERSION} | DB active={db.is_active}"
     )
 
-    return await review_handler.create_review(
-        db=db,
+    review = await service.add_review(
+        session=db,
         film_id=payload.film_id,
-        payload=payload,
+        rating=payload.rating,
+        review=payload.review,
+        reviewer_display_name=payload.reviewer_display_name,
+        user_id=payload.user_id,
     )
+    return ReviewResponse.model_validate(review)
 
 
 @router.patch(
@@ -119,21 +142,20 @@ async def create_review_direct(
     summary="Update a review",
 )
 async def update_review(
-    review_id: int,
+    review_id: uuid.UUID,
     payload: ReviewUpdate,
-    response: Response,
-    db: DatabaseSession = Depends(get_db),
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> ReviewResponse:
     """Update rating or review body of an existing review."""
-    response.headers["X-Trace-Id"] = trace_id
-
     logger.info(f"[{trace_id}] update_review({review_id}) | DB active={db.is_active}")
-    return await review_handler.update_review(
-        db=db,
+    review = await service.update_review(
+        session=db,
         review_id=review_id,
-        payload=payload,
+        **payload.model_dump(exclude_unset=True),
     )
+    return ReviewResponse.model_validate(review)
 
 
 @router.delete(
@@ -142,16 +164,12 @@ async def update_review(
     summary="Delete a review",
 )
 async def delete_review(
-    review_id: int,
-    response: Response,
-    db: DatabaseSession = Depends(get_db),
+    review_id: uuid.UUID,
+    service: ReviewService = Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
 ) -> MessageResponse:
-    """Delete a review by its ID."""
-    response.headers["X-Trace-Id"] = trace_id
-
+    """Delete a review by its UUID ID."""
     logger.info(f"[{trace_id}] delete_review({review_id}) | DB active={db.is_active}")
-    return await review_handler.delete_review(
-        db=db,
-        review_id=review_id,
-    )
+    await service.delete_review(session=db, review_id=review_id)
+    return MessageResponse(message=f"Review {review_id} successfully deleted", success=True)

@@ -127,9 +127,9 @@ Fully typed models using modern SQLAlchemy 2.0 `Mapped`, `mapped_column`, and `r
 - **Async DAO**: `film_dao.get_all(db: AsyncSession, ...)` executes real asynchronous SQLAlchemy `select()` queries.
 - **Route Handler**: `GET /api/v1/films` awaits the DAO call and returns existing Day 2 response schemas (`FilmResponse` with computed `years_since_release`) without altering the JSON response format.
 
-### 6. Database Initialization Utility (`app/core/init_db.py`)
-- Standalone utility function `init_db(engine)` using `Base.metadata.create_all`.
-- Runnable via `python -m app.core.init_db`.
+### 6. Database Utility (`app/core/database.py`)
+- Standalone utility function `init_db()` using `Base.metadata.create_all`.
+- Runnable directly via `python -m app.core.database` if needed.
 - **Not called automatically on application startup**.
 - **Production Note included in code**:
   > `Base.metadata.create_all()` creates missing tables only. It does not manage schema evolution. Production applications should use Alembic migrations instead.
@@ -147,7 +147,7 @@ Fully typed models using modern SQLAlchemy 2.0 `Mapped`, `mapped_column`, and `r
 
 2. (Optional) Initialize tables in your PostgreSQL database:
    ```bash
-   uv run python -m app.core.init_db
+   uv run python -m app.core.database
    ```
 
 3. Run the test suite:
@@ -168,3 +168,80 @@ docker compose up --build
 This boots:
 - `film-review-db-day4`: PostgreSQL 16 on port 5432 with health check.
 - `film-review-platform-day4`: FastAPI backend on port 8000 connected to the PostgreSQL container.
+
+---
+
+## 🔄 Database Migrations with Alembic (Async)
+
+In production environments, database schema changes must be version-controlled, auditable, reproducible, and reversible. `Base.metadata.create_all()` is strictly for ephemeral tests and prototypes; all production schema evolution is managed through Alembic.
+
+### 1. Alembic Architecture & Configuration
+- **Async Engine**: Configured in `alembic/env.py` using `async_engine_from_config(..., poolclass=pool.NullPool)` and `run_async_migrations()`.
+- **Dynamic Configuration**: Automatically loads database credentials directly from `app.core.config.settings.DATABASE_URL`.
+- **Target Metadata**: Registered via `from app.core.database import Base` and `import app.schemas`, exposing models to Alembic's autogeneration comparison engine.
+
+### 2. Migration History
+The repository includes two version-controlled migrations under `alembic/versions`:
+
+1. **Initial Schema Migration** (`6ec96ce24e17_create_initial_schema.py`):
+   - Automatically generated via:
+     ```bash
+     uv run alembic revision --autogenerate -m "create initial schema"
+     ```
+   - Creates `users`, `films`, and `reviews` tables along with primary keys, indexes, unique constraints, and foreign key cascades.
+   
+2. **Watchlist Extension Migration** (`4d1668473519_add_watchlist_table.py`):
+   - Extends the schema with a `watchlist` table representing a many-to-many relationship between `users` and `films`.
+   - Generated as an independent revision without modifying the first migration:
+     ```bash
+     uv run alembic revision --autogenerate -m "add watchlist table"
+     ```
+   - Defines composite primary key `(user_id, film_id)`, cascading foreign keys, and `created_at` timestamp.
+
+### 3. Alembic CLI Commands Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `uv run alembic current` | Shows the currently applied revision in the database. |
+| `uv run alembic history` | Lists all migrations in chronological order. |
+| `uv run alembic upgrade head` | Migrates the database forward to the most recent revision. |
+| `uv run alembic downgrade -1` | Rolls back the single most recent migration. |
+| `uv run alembic revision --autogenerate -m "..."` | Compares current ORM models against DB schema and generates migration. |
+
+---
+
+## 🌱 Idempotent Data Seeding (`scripts/seed.py`)
+
+Seed data is an independent, application-level concern and is strictly decoupled from schema migrations.
+
+### Running the Seed Script
+```bash
+uv run python scripts/seed.py
+```
+
+### Key Guarantees:
+- **Idempotency**: Running `scripts/seed.py` once or ten times produces the exact same final database state with zero duplicates.
+- **Pre-flight Existence Checks**: Verifies existing records using primary/unique keys (`username` for users, `(title, release_year)` for films, `(film_id, user_id)` for reviews).
+- **Rich Baseline Dataset**:
+  - **12 Films** spanning 7 genres (*Sci-Fi, Action, Thriller, Animation, Comedy, Drama, Crime*).
+  - **4 Users** covering distinct roles (*admin, critic, member, user*).
+  - **7 Reviews** with realistic ratings and detailed criticism.
+  - **6 Watchlist entries** connecting users to films.
+
+---
+
+## 🛠️ Complete Developer Setup Sequence
+
+```bash
+# 1. Start the PostgreSQL database
+docker compose up -d db
+
+# 2. Run all schema migrations
+uv run alembic upgrade head
+
+# 3. Populate baseline seed data
+uv run python scripts/seed.py
+
+# 4. Launch the API server
+uv run uvicorn app.main:app --reload --port 8000
+```

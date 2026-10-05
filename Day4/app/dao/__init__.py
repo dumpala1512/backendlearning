@@ -1,3 +1,9 @@
-from app.dao import film_dao, review_dao, user_dao
+from app.dao.film_dao import FilmDAO
+from app.dao.review_dao import ReviewDAO
+from app.dao.user_dao import UserDAO
 
-__all__ = ["film_dao", "review_dao", "user_dao"]
+__all__ = [
+    "FilmDAO",
+    "ReviewDAO",
+    "UserDAO",
+]

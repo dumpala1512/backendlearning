@@ -9,7 +9,8 @@ Demonstration service showcasing Pydantic v2 Serialization:
 - exclude_defaults
 """
 from typing import Any
-from app.models.film import FilmResponse, FilmUpdate
+from app.schemas.film import FilmResponse, FilmUpdate
+import uuid
 
 
 def demonstrate_serialization() -> dict[str, Any]:
@@ -18,7 +19,7 @@ def demonstrate_serialization() -> dict[str, Any]:
     """
     # Create sample instance
     film = FilmResponse(
-        id=1,
+        id=uuid.uuid4(),
         title="Interstellar",
         director="Christopher Nolan",
         releaseYear=2014,
@@ -52,7 +53,7 @@ def demonstrate_serialization() -> dict[str, Any]:
 
     # Sample model with default values (description defaults to "")
     film_with_defaults = FilmResponse(
-        id=2,
+        id=uuid.uuid4(),
         title="Memento",
         director="Christopher Nolan",
         releaseYear=2000,

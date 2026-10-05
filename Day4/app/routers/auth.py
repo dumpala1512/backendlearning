@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import DatabaseSession, get_db
-from app.handlers import auth_handler
-from app.models.user import TokenResponse, UserLoginRequest, UserRegisterRequest, UserResponse
+from app.dependencies import get_db, get_user_service
+from app.schemas.user import TokenResponse, UserLoginRequest, UserRegisterRequest, UserResponse
+from app.services.user_service import UserService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -17,16 +18,46 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 )
 async def register(
     payload: UserRegisterRequest,
-    db: DatabaseSession = Depends(get_db),
+    service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    """Register a new user account into PostgreSQL with real database persistence."""
-    return await auth_handler.register(db=db, payload=payload)
+    """
+    Register a new user account with real database persistence.
+    Follows: Route -> Service -> DAO -> AsyncSession -> Database.
+    """
+    user = await service.register(
+        session=db,
+        username=payload.username,
+        full_name=payload.full_name,
+        email=payload.email,
+        password=payload.password.get_secret_value(),
+        role=payload.role,
+    )
+    return UserResponse.model_validate(user)
 
 
 @router.post("/login", response_model=TokenResponse, summary="User login")
 async def login(
     payload: UserLoginRequest,
-    db: DatabaseSession = Depends(get_db),
+    service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    """Authenticate user credentials against PostgreSQL and receive access token."""
-    return await auth_handler.login(db=db, payload=payload)
+    """
+    Authenticate user credentials against database and receive access token.
+    Follows: Route -> Service -> DAO -> AsyncSession -> Database.
+    """
+    try:
+        token = await service.login(
+            session=db,
+            username=payload.username,
+            password=payload.password.get_secret_value(),
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+    )

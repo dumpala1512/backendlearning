@@ -11,7 +11,7 @@ _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 class Settings(BaseSettings):
     """
     Dynamic environment settings loaded exclusively from environment variables / .env.
-    All static project metadata and constants are defined in proj.py.
+    All static project metadata and constants are defined in project_config.py.
     """
     # Database
     DATABASE_URL: str

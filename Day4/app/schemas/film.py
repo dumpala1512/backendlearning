@@ -1,43 +1,78 @@
-from __future__ import annotations
-
-from datetime import datetime
-from typing import TYPE_CHECKING
-
-from sqlalchemy import DateTime, Integer, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.core.database import Base
-
-if TYPE_CHECKING:
-    from app.schemas.review import Review
+import uuid
+from datetime import datetime, timezone
+from pydantic import Field, computed_field, field_validator, model_validator
+from app.schemas.base import AppBaseModel
 
 
-class Film(Base):
-    """SQLAlchemy 2.0 ORM model for Films table."""
+class FilmBase(AppBaseModel):
+    """Reusable base film model with common attributes."""
 
-    __tablename__ = "films"
+    title: str = Field(..., min_length=1, max_length=200)
+    release_year: int = Field(..., ge=1888, le=2031, alias="releaseYear")
+    genre: str = Field(..., min_length=2, max_length=50)
+    director: str = Field(..., min_length=2, max_length=100)
+    description: str = Field(default="", max_length=2000)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    title: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
-    director: Mapped[str] = mapped_column(String(100), nullable=False)
-    release_year: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
-    genre: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
-    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str) -> str:
+        if not any(c.isalnum() for c in v):
+            raise ValueError("Film title must contain at least one alphanumeric character")
+        return v
 
-    # Relationship: A Film has many Reviews
-    reviews: Mapped[list[Review]] = relationship(
-        "Review",
-        back_populates="film",
-        cascade="all, delete-orphan",
-    )
-
-    def __repr__(self) -> str:
-        return f"<Film id={self.id} title='{self.title}' release_year={self.release_year}>"
+    @field_validator("release_year")
+    @classmethod
+    def validate_release_year(cls, v: int) -> int:
+        max_year = datetime.now(timezone.utc).year + 5
+        if v > max_year:
+            raise ValueError(f"Release year cannot be more than 5 years in the future (max: {max_year})")
+        return v
 
 
-FilmORM = Film
+class FilmCreate(FilmBase):
+    """Creation model — inherits all fields directly from FilmBase."""
+    pass
+
+
+class FilmUpdate(AppBaseModel):
+    """Partial update model with optional fields."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    release_year: int | None = Field(default=None, ge=1888, le=2100, alias="releaseYear")
+    genre: str | None = Field(default=None, min_length=2, max_length=50)
+    director: str | None = Field(default=None, min_length=2, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class FilmResponse(FilmBase):
+    """Response model extending FilmBase with ID and computed years_since_release."""
+
+    id: uuid.UUID = Field(..., strict=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @computed_field
+    @property
+    def years_since_release(self) -> int:
+        return max(0, datetime.now(timezone.utc).year - self.release_year)
+
+
+# Film domain entity aliases to FilmResponse (eliminates duplicate model definition)
+Film = FilmResponse
+
+
+class FilmFilterQuery(AppBaseModel):
+    """Filter parameters demonstrating @model_validator relationship validation."""
+
+    genre: str | None = None
+    start_year: int | None = Field(default=None, ge=1888, le=2100)
+    end_year: int | None = Field(default=None, ge=1888, le=2100)
+    limit: int = Field(default=10, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_year_range(self) -> "FilmFilterQuery":
+        if self.start_year is not None and self.end_year is not None:
+            if self.start_year > self.end_year:
+                raise ValueError(
+                    f"start_year ({self.start_year}) cannot be greater than end_year ({self.end_year})"
+                )
+        return self 

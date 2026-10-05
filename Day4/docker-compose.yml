@@ -24,7 +24,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: film-review-init-db-day4
-    command: ["python", "-m", "app.core.init_db"]
+    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py"]
     env_file:
       - .env
     environment:
