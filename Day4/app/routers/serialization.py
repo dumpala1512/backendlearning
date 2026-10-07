@@ -1,8 +1,9 @@
 from typing import Any
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.dependencies import get_current_user
 from app.services.serialization_service import demonstrate_serialization
 
-router = APIRouter(prefix="/serialization", tags=["Serialization"])
+router = APIRouter(prefix="/serialization", tags=["Serialization"], dependencies=[Depends(get_current_user)])
 
 
 @router.get(

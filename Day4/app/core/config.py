@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Logging
+    LOG_LEVEL: str = "INFO"
+
     model_config = SettingsConfigDict(
         env_file=(str(_ENV_PATH), ".env"),
         env_file_encoding="utf-8",

@@ -71,34 +71,36 @@ logger = logging.getLogger("seed")
 # Baseline Seed Data Definitions
 # ==============================================================================
 
+from app.core.security import hash_password
+
 SEED_USERS = [
     {
         "username": "admin_sarah",
         "full_name": "Sarah Connor",
         "email": "sarah.admin@filmcritic.org",
         "role": "admin",
-        "hashed_password": "pbkdf2_sha256$260000$admin_hashed_pw_seed_placeholder",
+        "hashed_password": hash_password("AdminPass123!"),
     },
     {
         "username": "marcus_reviews",
         "full_name": "Marcus Vance",
         "email": "marcus.critic@filmjournal.com",
         "role": "critic",
-        "hashed_password": "pbkdf2_sha256$260000$critic_hashed_pw_seed_placeholder",
+        "hashed_password": hash_password("CriticPass123!"),
     },
     {
         "username": "elena_cinephile",
         "full_name": "Elena Rostova",
         "email": "elena.member@movielovers.net",
         "role": "member",
-        "hashed_password": "pbkdf2_sha256$260000$member_hashed_pw_seed_placeholder",
+        "hashed_password": hash_password("MemberPass123!"),
     },
     {
         "username": "alex_viewer",
         "full_name": "Alex Mercer",
         "email": "alex.viewer@streamguide.io",
         "role": "user",
-        "hashed_password": "pbkdf2_sha256$260000$user_hashed_pw_seed_placeholder",
+        "hashed_password": hash_password("UserPass123!"),
     },
 ]
 
@@ -275,7 +277,7 @@ async def seed_users(session) -> dict[str, uuid.UUID]:
     for user_data in SEED_USERS:
         stmt = select(User).where(User.username == user_data["username"])
         result = await session.execute(stmt)
-        user = result.scalar_one_or_none()
+        user = result.scalars().first()
 
         if user is None:
             user = User(
@@ -319,7 +321,7 @@ async def seed_films(session) -> dict[tuple[str, int], uuid.UUID]:
             Film.release_year == film_data["release_year"],
         )
         result = await session.execute(stmt)
-        film = result.scalar_one_or_none()
+        film = result.scalars().first()
 
         if film is None:
             film = Film(
@@ -379,7 +381,7 @@ async def seed_reviews(
             Review.user_id == user_id,
         )
         result = await session.execute(stmt)
-        review = result.scalar_one_or_none()
+        review = result.scalars().first()
 
         if review is None:
             review = Review(
@@ -434,7 +436,7 @@ async def seed_watchlist(
             Watchlist.film_id == film_id,
         )
         result = await session.execute(stmt)
-        entry = result.scalar_one_or_none()
+        entry = result.scalars().first()
 
         if entry is None:
             entry = Watchlist(user_id=user_id, film_id=film_id)

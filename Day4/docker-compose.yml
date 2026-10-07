@@ -19,28 +19,12 @@ services:
     networks:
       - film-review-net
 
-  init-db:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: film-review-init-db-day4
-    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py"]
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-    networks:
-      - film-review-net
-
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: film-review-platform-day4
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
     env_file:
@@ -51,8 +35,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      init-db:
-        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\")' || exit 1"]

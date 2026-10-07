@@ -24,6 +24,7 @@ class ReviewUpdate(AppBaseModel):
 
     rating: int | None = Field(default=None, ge=1, le=10)
     review: str | None = Field(default=None, min_length=50)
+    user_id: uuid.UUID | None = Field(default=None, strict=False, description="User ID requesting update for author validation")
 
 
 class ReviewResponse(ReviewBase):

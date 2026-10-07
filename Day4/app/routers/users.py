@@ -4,23 +4,22 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import UserNotFoundError
-from app.dependencies import get_db, get_user_service
-from app.schemas.user import AdminStatsResponse, UserResponse
+from app.exceptions import UserNotFoundError
+from app.dependencies import get_current_user, get_db, get_user_service
+from app.schemas.user import AdminStatsResponse, AuthenticatedUser, UserResponse
 from app.services.user_service import UserService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/users/me", response_model=UserResponse, tags=["Users"], summary="Get current user profile")
 async def get_current_user_profile(
+    current_user: AuthenticatedUser = Depends(get_current_user),
     service: UserService = Depends(get_user_service),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    """Get profile information for the current user from PostgreSQL."""
-    user = await service.get_current_user(session=db)
-    if not user:
-        raise UserNotFoundError("No user profile found. Please register or seed a user first.")
+    """Get profile information for the authenticated current user from PostgreSQL."""
+    user = await service.get_by_id(session=db, user_id=current_user.id)
     return UserResponse.model_validate(user)
 
 

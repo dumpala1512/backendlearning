@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 from typing import Sequence
 import uuid
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import FilmNotFoundError
 from app.dao.film_dao import FilmDAO
+from app.dao.review_dao import ReviewDAO
+from app.exceptions.film import FilmHasActiveReviewsError, FilmNotFoundError
 from app.models.film import Film, FilmORM
+
+logger = logging.getLogger("film_service")
 
 
 def get_film_dao() -> FilmDAO:
@@ -16,16 +20,25 @@ def get_film_dao() -> FilmDAO:
     return FilmDAO()
 
 
+def get_review_dao() -> ReviewDAO:
+    """Dependency provider returning a ReviewDAO instance."""
+    return ReviewDAO()
+
+
 class FilmService:
     """
-    Thin Service layer for Film business logic and orchestration.
-    Receives FilmDAO via constructor injection and receives AsyncSession from routes.
-    Contains business logic and raises domain exceptions (FilmNotFoundError) when data is missing.
-    Never executes direct SQLAlchemy queries.
+    Service layer for Film business logic and orchestration.
+    Receives FilmDAO and ReviewDAO via constructor injection and receives AsyncSession from caller.
+    Orchestrates business rules across DAOs without ever executing direct SQLAlchemy queries.
     """
 
-    def __init__(self, dao: FilmDAO = Depends(get_film_dao)):
+    def __init__(
+        self,
+        dao: FilmDAO = Depends(get_film_dao),
+        review_dao: ReviewDAO | None = None,
+    ):
         self.dao = dao
+        self.review_dao = review_dao or ReviewDAO()
 
     async def get_by_id(self, session: AsyncSession, film_id: uuid.UUID) -> Film:
         """
@@ -33,7 +46,7 @@ class FilmService:
         """
         film = await self.dao.get_by_id(session, film_id)
         if film is None:
-            raise FilmNotFoundError(f"Film with id {film_id} not found")
+            raise FilmNotFoundError(film_id=film_id)
         return film
 
     async def get_film(self, session: AsyncSession, film_id: uuid.UUID) -> Film:
@@ -77,7 +90,7 @@ class FilmService:
         """
         Validate and create a new film with UUID PK.
         """
-        return await self.dao.create(
+        film = await self.dao.create(
             session=session,
             title=title.strip(),
             director=director.strip(),
@@ -85,6 +98,13 @@ class FilmService:
             genre=genre.strip(),
             description=description.strip(),
         )
+        logger.info(
+            "Film '%s' created successfully with id %s",
+            film.title,
+            film.id,
+            extra={"film_id": str(film.id), "title": film.title},
+        )
+        return film
 
     async def update_film(
         self,
@@ -97,7 +117,12 @@ class FilmService:
         """
         film = await self.dao.update(session, film_id, **updates)
         if film is None:
-            raise FilmNotFoundError(f"Film with id {film_id} not found")
+            raise FilmNotFoundError(film_id=film_id)
+        logger.info(
+            "Film %s updated successfully",
+            film_id,
+            extra={"film_id": str(film_id)},
+        )
         return film
 
     async def delete_film(
@@ -106,16 +131,38 @@ class FilmService:
         film_id: uuid.UUID,
     ) -> bool:
         """
-        Soft delete a film or raise domain FilmNotFoundError if missing.
+        Soft delete a film after verifying business rules:
+        Rule 3: A film may not be soft deleted while it still has active reviews.
         """
+        film = await self.dao.get_by_id(session, film_id)
+        if film is None:
+            raise FilmNotFoundError(film_id=film_id)
+
+        # Check for active reviews associated with this film
+        active_reviews = await self.review_dao.list_reviews(session, film_id=film_id)
+        if len(active_reviews) > 0:
+            logger.warning(
+                "Film deletion blocked: film %s has %d active review(s)",
+                film_id,
+                len(active_reviews),
+                extra={"film_id": str(film_id), "active_reviews_count": len(active_reviews)},
+            )
+            raise FilmHasActiveReviewsError(film_id=film_id, active_reviews_count=len(active_reviews))
+
         success = await self.dao.soft_delete(session, film_id)
         if not success:
-            raise FilmNotFoundError(f"Film with id {film_id} not found")
+            raise FilmNotFoundError(film_id=film_id)
+
+        logger.info(
+            "Film %s soft deleted successfully",
+            film_id,
+            extra={"film_id": str(film_id)},
+        )
         return True
 
 
 # Default instance and module-level helpers for backward compatibility
-_default_film_service = FilmService(dao=FilmDAO())
+_default_film_service = FilmService(dao=FilmDAO(), review_dao=ReviewDAO())
 
 
 async def list_films(

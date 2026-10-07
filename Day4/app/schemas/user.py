@@ -47,10 +47,81 @@ class UserRegisterRequest(UserBase):
 
 
 class UserLoginRequest(AppBaseModel):
-    """Login model."""
+    """Login model accepting either username or email (neither requires the other)."""
 
+    username: str | None = Field(
+        default=None,
+        description="Username or email address (provide either username or email)",
+    )
+    email: str | None = Field(
+        default=None,
+        description="Email address (optional if username is provided)",
+    )
+    password: SecretStr = Field(
+        ...,
+        description="User password",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "username": "bob_builder",
+                    "password": "CanWeFixIt123!",
+                },
+                {
+                    "email": "bob@example.com",
+                    "password": "CanWeFixIt123!",
+                },
+            ]
+        }
+    }
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_identifiers(cls, data: object) -> object:
+        if isinstance(data, dict):
+            # Check for alternative aliases like identifier or username_or_email
+            ident = data.get("identifier") or data.get("username_or_email")
+            if ident and not data.get("username") and not data.get("email"):
+                if "@" in str(ident):
+                    data["email"] = str(ident).strip()
+                else:
+                    data["username"] = str(ident).strip()
+
+            # Normalize empty strings or whitespace to None so neither field is forced
+            if "email" in data and isinstance(data["email"], str) and not data["email"].strip():
+                data["email"] = None
+            if "username" in data and isinstance(data["username"], str) and not data["username"].strip():
+                data["username"] = None
+
+            # If username looks like an email and email is not provided, also populate email
+            username_val = data.get("username")
+            if username_val and "@" in str(username_val) and not data.get("email"):
+                data["email"] = str(username_val).strip()
+
+        return data
+
+    @model_validator(mode="after")
+    def validate_identifier(self) -> "UserLoginRequest":
+        if not self.username and not self.email:
+            raise ValueError("Either username or email must be provided.")
+        return self
+
+
+class RefreshTokenRequest(AppBaseModel):
+    """Payload for refreshing an access token."""
+
+    refresh_token: str = Field(..., min_length=10, description="The refresh token string")
+
+
+class AuthenticatedUser(AppBaseModel):
+    """Stateless authenticated user identity derived directly from validated JWT claims."""
+
+    id: uuid.UUID = Field(..., strict=False)
     username: str
-    password: SecretStr
+    role: str = "user"
+    email: str | None = None
 
 
 class UserResponse(UserBase):
@@ -70,9 +141,11 @@ class TokenResponse(AppBaseModel):
     """JWT Token response."""
 
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user_id: uuid.UUID | None = Field(default=None, strict=False)
     username: str | None = None
+    role: str | None = None
 
 
 class AdminStatsResponse(AppBaseModel):

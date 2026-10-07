@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import Base
+from app.core.security import create_access_token
 from app.dependencies import get_db
 from app.main import app
 # Import all models to ensure they are registered on Base.metadata
 from app.models.film import Film
+from app.models.refresh_token import RefreshToken
 from app.models.review import Review
 from app.models.user import User
 from app.models.watchlist import Watchlist
@@ -36,6 +39,27 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
+def default_user_id() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+@pytest.fixture
+def auth_token(default_user_id: uuid.UUID) -> str:
+    return create_access_token(
+        data={
+            "sub": str(default_user_id),
+            "username": "test_auth_user",
+            "role": "user",
+        }
+    )
+
+
+@pytest.fixture
+def auth_headers(auth_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest.fixture
 async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     session_factory = async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -52,3 +76,9 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def auth_client(client: AsyncClient, auth_headers: dict[str, str]) -> AsyncClient:
+    client.headers.update(auth_headers)
+    return client

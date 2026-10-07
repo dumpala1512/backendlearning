@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-# Configure logger
+from app.logging import configure_logging
+
+# Configure structured JSON logging globally
+configure_logging()
 logger = logging.getLogger("film_review_platform")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -14,10 +19,8 @@ async def lifespan(app: FastAPI):
     """
     # Startup logic
     logger.info("Starting up Film Review Platform API...")
-    # (Initialize connection pools, caches, etc. here if needed)
 
     yield
 
     # Shutdown logic
     logger.info("Shutting down Film Review Platform API...")
-    # (Clean up connection pools, close files, etc. here)

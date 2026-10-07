@@ -18,6 +18,8 @@ from app.schemas.review import (
 )
 from app.schemas.user import (
     AdminStatsResponse,
+    AuthenticatedUser,
+    RefreshTokenRequest,
     TokenResponse,
     User,
     UserBase,
@@ -51,6 +53,8 @@ __all__ = [
     "UserBase",
     "UserRegisterRequest",
     "UserLoginRequest",
+    "RefreshTokenRequest",
+    "AuthenticatedUser",
     "UserResponse",
     "TokenResponse",
     "AdminStatsResponse",

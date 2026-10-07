@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.refresh_token import RefreshToken
     from app.models.review import Review
     from app.models.watchlist import Watchlist
 
@@ -46,6 +47,13 @@ class User(Base):
     # Relationship: A User can have many Films in their Watchlist
     watchlist_items: Mapped[list[Watchlist]] = relationship(
         "Watchlist",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    # Relationship: A User can have many active or past Refresh Tokens
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )

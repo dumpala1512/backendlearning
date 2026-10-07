@@ -38,11 +38,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-def get_trace_id(
+def get_request_id(
     request: Request,
 ) -> str:
-    """Retrieve automatically generated trace ID from request state or generate a new UUID4."""
-    return getattr(request.state, "trace_id", None) or str(uuid.uuid4())
+    """Retrieve active request ID from request state or generate a new UUID4."""
+    return getattr(request.state, "request_id", None) or str(uuid.uuid4())
+
+
+# Backward-compatibility alias
+get_trace_id = get_request_id
 
 
 # ---------------------------------------------------------------------------
@@ -63,14 +67,26 @@ def get_user_dao() -> UserDAO:
     return UserDAO()
 
 
+from app.core.security import decode_token
+from app.dao.refresh_token_dao import RefreshTokenDAO, default_refresh_token_dao
+from app.exceptions.user import AuthenticationError, InvalidTokenError
+from app.schemas.user import AuthenticatedUser
+
+
+def get_refresh_token_dao() -> RefreshTokenDAO:
+    """Provide RefreshTokenDAO dependency."""
+    return default_refresh_token_dao
+
+
 # ---------------------------------------------------------------------------
 # Service Dependency Providers
 # ---------------------------------------------------------------------------
 def get_film_service(
     dao: FilmDAO = Depends(get_film_dao),
+    review_dao: ReviewDAO = Depends(get_review_dao),
 ) -> FilmService:
-    """Provide FilmService with injected FilmDAO."""
-    return FilmService(dao=dao)
+    """Provide FilmService with injected FilmDAO and ReviewDAO."""
+    return FilmService(dao=dao, review_dao=review_dao)
 
 
 def get_review_service(
@@ -85,6 +101,61 @@ def get_user_service(
     dao: UserDAO = Depends(get_user_dao),
     film_dao: FilmDAO = Depends(get_film_dao),
     review_dao: ReviewDAO = Depends(get_review_dao),
+    refresh_token_dao: RefreshTokenDAO = Depends(get_refresh_token_dao),
 ) -> UserService:
-    """Provide UserService with injected UserDAO, FilmDAO, and ReviewDAO."""
-    return UserService(dao=dao, film_dao=film_dao, review_dao=review_dao)
+    """Provide UserService with injected UserDAO, FilmDAO, ReviewDAO, and RefreshTokenDAO."""
+    return UserService(
+        dao=dao,
+        film_dao=film_dao,
+        review_dao=review_dao,
+        refresh_token_dao=refresh_token_dao,
+    )
+
+
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+http_bearer = HTTPBearer(
+    auto_error=False,
+    description="Enter your JWT Access Token",
+)
+
+
+# ---------------------------------------------------------------------------
+# Authentication Dependency
+# ---------------------------------------------------------------------------
+async def get_current_user(
+    auth: HTTPAuthorizationCredentials | None = Depends(http_bearer),
+    raw_auth: str | None = Header(None, alias="Authorization"),
+) -> AuthenticatedUser:
+    """
+    Reusable FastAPI authentication dependency using HTTPBearer.
+    - Enables Swagger UI 'Authorize' button with direct Access Token input
+    - Renders lock icons (🔒) on all protected routes
+    - Decodes the JWT and validates claims statelessly
+    - Rejects unauthenticated requests with HTTP 401 Unauthorized
+    """
+    if not auth or not auth.credentials:
+        if raw_auth and not raw_auth.lower().startswith("bearer "):
+            raise AuthenticationError(message="Invalid authorization header format. Expected 'Bearer <token>'.")
+        raise AuthenticationError(message="Authorization header is missing.")
+
+    token = auth.credentials
+    payload = decode_token(token, expected_type="access")
+
+    sub = payload.get("sub")
+    username = payload.get("username")
+    role = payload.get("role", "user")
+
+    if not sub or not username:
+        raise InvalidTokenError(message="Token missing required user claims.")
+
+    try:
+        user_id = uuid.UUID(sub)
+    except (ValueError, TypeError):
+        raise InvalidTokenError(message="Invalid user ID format in token subject.")
+
+    return AuthenticatedUser(
+        id=user_id,
+        username=username,
+        role=role,
+    )

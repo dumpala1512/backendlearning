@@ -6,7 +6,8 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_complete_film_route_to_database_flow(client: AsyncClient):
+async def test_complete_film_route_to_database_flow(auth_client: AsyncClient):
+    client = auth_client
     # 1. Create a film via POST /api/v1/films
     create_payload = {
         "title": "The Matrix",
@@ -17,8 +18,8 @@ async def test_complete_film_route_to_database_flow(client: AsyncClient):
     }
     create_res = await client.post("/api/v1/films", json=create_payload)
     assert create_res.status_code == 201
-    assert "x-trace-id" in create_res.headers
-    assert len(create_res.headers["x-trace-id"]) > 0
+    assert "x-request-id" in create_res.headers
+    assert len(create_res.headers["x-request-id"]) > 0
     created_film = create_res.json()
     assert created_film["title"] == "The Matrix"
     assert created_film["id"] is not None
@@ -68,11 +69,15 @@ async def test_complete_film_route_to_database_flow(client: AsyncClient):
     # 9. Requesting non-existent film triggers domain exception handler -> 404
     missing_res = await client.get(f"/api/v1/films/{uuid.uuid4()}")
     assert missing_res.status_code == 404
-    assert "not found" in missing_res.json()["detail"].lower()
+    error_payload = missing_res.json()
+    assert error_payload["type"] == "FilmNotFound"
+    assert "not found" in error_payload["message"].lower()
+    assert "film_id" in error_payload["detail"]
 
 
 @pytest.mark.asyncio
-async def test_complete_review_route_to_database_flow(client: AsyncClient):
+async def test_complete_review_route_to_database_flow(auth_client: AsyncClient):
+    client = auth_client
     # 1. Create a film to attach reviews to
     film_res = await client.post(
         "/api/v1/films",
@@ -136,7 +141,8 @@ async def test_complete_review_route_to_database_flow(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_soft_delete_affects_all_routes_and_admin_stats(client: AsyncClient):
+async def test_soft_delete_affects_all_routes_and_admin_stats(auth_client: AsyncClient):
+    client = auth_client
     """
     Verify that soft deleting a film:
     1. Decrements total_films in admin stats
@@ -182,7 +188,17 @@ async def test_soft_delete_affects_all_routes_and_admin_stats(client: AsyncClien
     assert films_count_before >= 1
     assert reviews_count_before >= 1
 
-    # 4. Soft delete the film
+    # 4. Soft delete blocked by active review (Rule 3) -> 409 Conflict
+    del_res = await client.delete(f"/api/v1/films/{film_id}")
+    assert del_res.status_code == 409
+    assert del_res.json()["type"] == "FilmHasActiveReviews"
+
+    # Delete the active review first
+    rev_id = rev_res.json()["id"]
+    del_rev_res = await client.delete(f"/api/v1/reviews/{rev_id}")
+    assert del_rev_res.status_code == 200
+
+    # Soft delete now succeeds
     del_res = await client.delete(f"/api/v1/films/{film_id}")
     assert del_res.status_code == 200
 

@@ -105,6 +105,19 @@ class ReviewDAO:
         result = await session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_film_and_user(
+        self,
+        session: AsyncSession,
+        film_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> Review | None:
+        """
+        Find a review by film_id and user_id to enforce Rule 1 (one review per user per film).
+        """
+        query = select(Review).where(Review.film_id == film_id, Review.user_id == user_id)
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
     async def update(
         self,
         session: AsyncSession,

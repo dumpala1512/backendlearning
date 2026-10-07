@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import project_config
-from app.dependencies import get_db, get_film_service, get_trace_id
+from app.dependencies import get_current_user, get_db, get_film_service, get_request_id
 from app.schemas.common import MessageResponse
 from app.schemas.film import FilmCreate, FilmFilterQuery, FilmResponse, FilmUpdate
 from app.services.film_service import FilmService
 
 logger = logging.getLogger("film_review.routers.films")
 
-router = APIRouter(prefix="/films", tags=["Films"])
+router = APIRouter(prefix="/films", tags=["Films"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("", response_model=list[FilmResponse], summary="List all films")
@@ -24,14 +24,14 @@ async def list_films(
     limit: int = Query(10, ge=1, le=100, description="Max number of films to return"),
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
-    trace_id: str = Depends(get_trace_id),
+    request_id: str = Depends(get_request_id),
 ) -> list[FilmResponse]:
     """
     Retrieve all films with optional genre and validated year range filters.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
-        f"[{trace_id}] list_films called | API {project_config.API_VERSION} | "
+        f"[{request_id}] list_films called | API {project_config.API_VERSION} | "
         f"DB Session active={db.is_active}"
     )
 
@@ -58,14 +58,14 @@ async def get_film(
     film_id: uuid.UUID,
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
-    trace_id: str = Depends(get_trace_id),
+    request_id: str = Depends(get_request_id),
 ) -> FilmResponse:
     """
     Retrieve a single film by UUID ID.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
-        f"[{trace_id}] get_film({film_id}) | API {project_config.API_VERSION} | "
+        f"[{request_id}] get_film({film_id}) | API {project_config.API_VERSION} | "
         f"DB Session active={db.is_active}"
     )
     film = await service.get_by_id(session=db, film_id=film_id)
@@ -77,14 +77,14 @@ async def create_film(
     payload: FilmCreate,
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
-    trace_id: str = Depends(get_trace_id),
+    request_id: str = Depends(get_request_id),
 ) -> FilmResponse:
     """
     Create a new film in PostgreSQL.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
-        f"[{trace_id}] create_film '{payload.title}' | API {project_config.API_VERSION} | "
+        f"[{request_id}] create_film '{payload.title}' | API {project_config.API_VERSION} | "
         f"DB active={db.is_active}"
     )
     film = await service.create_film(
@@ -104,13 +104,13 @@ async def update_film(
     payload: FilmUpdate,
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
-    trace_id: str = Depends(get_trace_id),
+    request_id: str = Depends(get_request_id),
 ) -> FilmResponse:
     """
     Partially update an existing film in PostgreSQL.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
-    logger.info(f"[{trace_id}] update_film({film_id}) | DB active={db.is_active}")
+    logger.info(f"[{request_id}] update_film({film_id}) | DB active={db.is_active}")
     film = await service.update_film(
         session=db,
         film_id=film_id,
@@ -124,12 +124,12 @@ async def delete_film(
     film_id: uuid.UUID,
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
-    trace_id: str = Depends(get_trace_id),
+    request_id: str = Depends(get_request_id),
 ) -> MessageResponse:
     """
     Soft delete a film by UUID ID.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
-    logger.info(f"[{trace_id}] delete_film({film_id}) | DB active={db.is_active}")
+    logger.info(f"[{request_id}] delete_film({film_id}) | DB active={db.is_active}")
     await service.delete_film(session=db, film_id=film_id)
     return MessageResponse(message=f"Film {film_id} successfully deleted", success=True)

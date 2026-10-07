@@ -42,6 +42,9 @@ COPY --chown=appuser:appgroup alembic/ ./alembic
 COPY --chown=appuser:appgroup alembic.ini ./alembic.ini
 COPY --chown=appuser:appgroup scripts/ ./scripts
 
+# Make scripts executable and normalize line endings for Linux
+RUN sed -i 's/\r$//' scripts/*.sh && chmod +x scripts/*.sh
+
 # Switch to non-root user
 USER appuser
 
@@ -51,6 +54,9 @@ EXPOSE 8000
 # Native healthcheck using Python standard library (no curl or extra apt packages needed)
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')" || exit 1
+
+# Entrypoint runs migrations and seed automation before launching the application
+ENTRYPOINT ["scripts/entrypoint.sh"]
 
 # Start the application using uvicorn from the virtual environment
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,10 +1,20 @@
+from __future__ import annotations
+
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import project_config
 from app.core.lifespan import lifespan
+from app.exceptions.handlers import register_exception_handlers
+from app.logging.config import configure_logging
+from app.middleware.request_id import RequestIDMiddleware
 from app.routers.api import api_v1_router
 from app.routers.health import router as health_router
+
+# Configure global structured JSON logging before app bootstrap
+configure_logging()
+logger = logging.getLogger("app.main")
 
 # OpenAPI tags metadata for structured /docs grouping
 openapi_tags = [
@@ -14,15 +24,16 @@ openapi_tags = [
     },
     {
         "name": "Films",
-        "description": "Operations on films catalog with real asynchronous SQLAlchemy 2.0 queries.",
+        
+        "description": "Films catalog managed via Service Layer orchestration, domain rules, and async DAO queries.",
     },
     {
         "name": "Reviews",
-        "description": "Operations on film reviews and ratings with real asynchronous SQLAlchemy queries.",
+        "description": "Film reviews and ratings enforcing domain business rules (Rule 1 & Rule 2) through Service Layer.",
     },
     {
         "name": "Authentication",
-        "description": "User registration and authentication tokens.",
+        "description": "User registration with bcrypt password hashing, login token issuance (access + refresh tokens), and access token refresh.",
     },
     {
         "name": "Users",
@@ -39,12 +50,14 @@ openapi_tags = [
 ]
 
 app = FastAPI(
-    title=f"{project_config.PROJECT_NAME} (Day 4 - PostgreSQL + SQLAlchemy 2.0 Async)",
+    title=f"{project_config.PROJECT_NAME} (JWT Authentication & RBAC)",
     version=project_config.API_VERSION,
     description=(
-        "A production-style REST API demonstrating real asynchronous PostgreSQL database integration "
-        "using SQLAlchemy 2.0 Async (create_async_engine, async_sessionmaker, AsyncSession), "
-        "typed ORM models (User, Film, Review), relationships with eager loading, and async DAO queries."
+        "Production REST API featuring stateless JWT authentication (access & refresh tokens with bcrypt hashing), "
+        "reusable dependency-injected authentication guards, a clean layered architecture (Route -> Service -> DAO -> AsyncSession -> Database), "
+        "strict domain business rules (Rule 1: one review per film per user, Rule 2: author-only review updates, "
+        "Rule 3: no soft delete of films with active reviews), centralized domain exception handling, "
+        "and structured JSON logging with request-scoped tracing."
     ),
     lifespan=lifespan,
     openapi_tags=openapi_tags,
@@ -53,25 +66,14 @@ app = FastAPI(
 # Apply CORS middleware configured from static project settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=project_config.ALLOWED_CORS_ORIGINS,   # list of origins that are allowed to make requests
-    allow_credentials=True,                      # allow credentials to be sent
-    allow_methods=["*"],                       # allow all HTTP methods
-    allow_headers=["*"],                       # allow all headers
+    allow_origins=project_config.ALLOWED_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-import uuid
-from fastapi import Request, Response
-
-
-@app.middleware("http")
-async def trace_id_middleware(request: Request, call_next):
-    """Automatically attach or generate X-Trace-Id on every HTTP request and response."""
-    trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
-    request.state.trace_id = trace_id
-    response: Response = await call_next(request)
-    response.headers["X-Trace-Id"] = trace_id
-    return response
-
+# Request-scoped logging & tracing middleware
+app.add_middleware(RequestIDMiddleware)
 
 # Root-level health endpoint: GET /health
 app.include_router(health_router)
@@ -79,28 +81,8 @@ app.include_router(health_router)
 # Versioned API routes under /api/v1
 app.include_router(api_v1_router, prefix=project_config.API_V1_PREFIX)
 
-
-# Domain exception handlers
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from app.core.exceptions import DuplicateEntityError, EntityNotFoundError
-
-
-@app.exception_handler(EntityNotFoundError)
-async def entity_not_found_handler(request: Request, exc: EntityNotFoundError):
-    return JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND,
-        content={"detail": str(exc)},
-    )
-
-
-@app.exception_handler(DuplicateEntityError)
-async def duplicate_entity_handler(request: Request, exc: DuplicateEntityError):
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={"detail": str(exc)},
-    )
-
+# Centralized domain exception handlers
+register_exception_handlers(app)
 
 
 if __name__ == "__main__":
