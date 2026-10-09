@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Any, Sequence
 import uuid
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -15,18 +17,20 @@ from app.core.security import (
     verify_password,
 )
 from app.dao.film_dao import FilmDAO
-from app.dao.refresh_token_dao import RefreshTokenDAO, default_refresh_token_dao
 from app.dao.review_dao import ReviewDAO
 from app.dao.user_dao import UserDAO
 from app.exceptions import (
     DuplicateEntityError,
     InvalidCredentialsError,
     InvalidTokenError,
+    PermissionDeniedError,
     TokenExpiredError,
     TokenReusedError,
+    TokenRevokedError,
     UserNotFoundError,
 )
 from app.models.user import User, UserORM
+from app.services.redis_service import RedisService
 
 
 def get_user_dao() -> UserDAO:
@@ -41,14 +45,13 @@ def get_review_dao() -> ReviewDAO:
     return ReviewDAO()
 
 
-def get_refresh_token_dao() -> RefreshTokenDAO:
-    return default_refresh_token_dao
+logger = logging.getLogger("film_review.services.user")
 
 
 class UserService:
     """
     Service layer for User business logic, credentials, and token management.
-    Receives UserDAO, FilmDAO, ReviewDAO, and RefreshTokenDAO via constructor injection.
+    Receives UserDAO, FilmDAO, ReviewDAO, and RedisService via constructor injection.
     """
 
     def __init__(
@@ -56,12 +59,13 @@ class UserService:
         dao: UserDAO = Depends(get_user_dao),
         film_dao: FilmDAO = Depends(get_film_dao),
         review_dao: ReviewDAO = Depends(get_review_dao),
-        refresh_token_dao: RefreshTokenDAO = Depends(get_refresh_token_dao),
+        refresh_token_dao: Any = None,
+        redis_service: RedisService | None = None,
     ):
         self.dao = dao
         self.film_dao = film_dao
         self.review_dao = review_dao
-        self.refresh_token_dao = refresh_token_dao
+        self.redis_service = redis_service
 
     async def get_by_email(self, session: AsyncSession, email: str) -> User:
         """Find a user by email or raise UserNotFoundError."""
@@ -83,10 +87,19 @@ class UserService:
         username: str,
         email: str,
         password: str,
-        role: str = "user",
+        role: str = "viewer",
         full_name: str = "",
     ) -> User:
         """Register a new user account with duplicate checks and bcrypt password hashing."""
+        if full_name is None:
+            raise ValueError("Full name cannot be null.")
+
+        if role.strip().lower() == "admin":
+            raise PermissionDeniedError(
+                "Creating admin accounts via registration is prohibited. "
+                "Only one system administrator account exists."
+            )
+
         existing_user = await self.dao.get_by_username(session, username)
         if existing_user:
             raise DuplicateEntityError(f"Username '{username}' is already taken.")
@@ -116,8 +129,8 @@ class UserService:
     ) -> tuple[str, str, User]:
         """
         Authenticate user credentials by username or email.
-        Issues both an access token and a refresh token, recording the refresh token
-        in the server-side database for replay prevention.
+        Issues an access token and a refresh token, recording the refresh token
+        in Redis with TTL matching the JWT expiration.
         """
         user = None
         if username:
@@ -130,6 +143,7 @@ class UserService:
                 user = await self.dao.get_by_username(session, email)
 
         if not user or not verify_password(password, user.hashed_password):
+            logger.warning(f"Failed login attempt for identifier='{username or email}'")
             raise InvalidCredentialsError(message="Invalid username or password credentials provided.")
 
         token_data = {
@@ -138,19 +152,37 @@ class UserService:
             "role": user.role,
         }
         access_token = create_access_token(token_data)
+        refresh_token = create_refresh_token(token_data)
 
-        jti = str(uuid.uuid4())
-        refresh_token = create_refresh_token(token_data, jti=jti)
-        payload = decode_token(refresh_token, expected_type="refresh")
-        expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        # Store refresh token in Redis with TTL = refresh token expiry
+        if not self.redis_service:
+            logger.warning(
+                "Redis service is unavailable; skipping storing refresh token for user %s",
+                user.id,
+            )
+        else:
+            try:
+                ttl = settings.refresh_token_ttl_seconds
+                await self.redis_service.set(
+                    f"refresh_token:{refresh_token}",
+                    str(user.id),
+                    ttl=ttl,
+                )
+                # Track user's active refresh tokens for revocation during logout
+                user_key = f"user_refresh_tokens:{user.id}"
+                existing = await self.redis_service.get(user_key)
+                tokens_list = existing if isinstance(existing, list) else ([existing] if existing else [])
+                tokens_list.append(refresh_token)
+                await self.redis_service.set(user_key, tokens_list, ttl=ttl)
 
-        await self.refresh_token_dao.create(
-            session=session,
-            token=refresh_token,
-            jti=jti,
-            user_id=user.id,
-            expires_at=expires_at,
-        )
+                logger.info(f"Stored refresh token for user {user.id}")
+            except Exception as exc:
+                logger.error(
+                    "Error storing refresh token in Redis for user %s: %s",
+                    user.id,
+                    exc,
+                )
+
         return access_token, refresh_token, user
 
     async def refresh_access_token(
@@ -159,37 +191,29 @@ class UserService:
         refresh_token: str,
     ) -> str:
         """
-        Validate refresh token, reject expired or already-used tokens,
-        mark the token as used, and issue a brand new access token.
+        Validate refresh token:
+        1. JWT signature
+        2. JWT expiry
+        3. Token still exists in Redis
+        If Redis lookup fails, returns HTTP 401 with 'Refresh token has been revoked'.
         """
         payload = decode_token(refresh_token, expected_type="refresh")
-        jti = payload.get("jti")
         user_id_str = payload.get("sub")
-        if not jti or not user_id_str:
+        if not user_id_str:
             raise InvalidTokenError(message="Refresh token is missing required claims.")
 
-        record = await self.refresh_token_dao.get_by_jti(session, jti)
-        if not record:
-            record = await self.refresh_token_dao.get_by_token(session, refresh_token)
-        if not record:
-            raise InvalidTokenError(message="Invalid refresh token.")
+        try:
+            user_id = uuid.UUID(user_id_str)
+        except (ValueError, TypeError):
+            raise InvalidTokenError(message="Invalid user ID format in token subject.")
 
-        if record.is_used:
-            raise TokenReusedError(message="Refresh token has already been used.")
-        if record.is_revoked:
-            raise TokenReusedError(message="Refresh token has been revoked.")
+        # Redis verification: ensure token is active and not revoked/logged out
+        if self.redis_service:
+            token_entry = await self.redis_service.get(f"refresh_token:{refresh_token}")
+            if not token_entry:
+                logger.warning(f"Refresh rejected: refresh token for user {user_id} has been revoked or expired in Redis")
+                raise TokenRevokedError(message="Refresh token has been revoked", detail="Refresh token has been revoked")
 
-        expires_at = record.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-        if expires_at < datetime.now(timezone.utc):
-            raise TokenExpiredError(message="Refresh token has expired.")
-
-        # Mark refresh token as used (single use / replay protection)
-        await self.refresh_token_dao.mark_as_used(session, record)
-
-        user_id = uuid.UUID(user_id_str)
         user = await self.dao.get_by_id(session, user_id)
         if not user:
             raise UserNotFoundError(user_id=user_id)
@@ -202,6 +226,38 @@ class UserService:
             }
         )
 
+    async def logout(self, user_id: uuid.UUID) -> None:
+        """
+        Revoke the user's refresh token(s) from Redis.
+        Ensures deleted refresh tokens cannot be used to refresh access tokens.
+        """
+        if not self.redis_service:
+            logger.warning(
+                "Redis service is unavailable; cannot revoke refresh tokens for user %s",
+                user_id,
+            )
+            return
+
+        try:
+            user_key = f"user_refresh_tokens:{user_id}"
+            tokens = await self.redis_service.get(user_key)
+            if tokens:
+                if isinstance(tokens, list):
+                    for token in tokens:
+                        await self.redis_service.delete(f"refresh_token:{token}")
+                    logger.info(f"Revoked refresh token for user {user_id}")
+                else:
+                    await self.redis_service.delete(f"refresh_token:{tokens}")
+                await self.redis_service.delete(user_key)
+
+            logger.info("Revoked refresh token for user %s", user_id)
+        except Exception as exc:
+            logger.error(
+                "Error revoking refresh tokens from Redis for user %s: %s",
+                user_id,
+                exc,
+            )
+
     async def get_current_user(self, session: AsyncSession) -> User | None:
         """Return the current/first user or None."""
         users = await self.dao.get_all(session, limit=1)
@@ -211,12 +267,19 @@ class UserService:
         """Return all users up to limit."""
         return await self.dao.get_all(session=session, limit=limit)
 
-    async def get_admin_stats(self, session: AsyncSession) -> dict[str, int | str]:
-        """Aggregate high-level platform statistics using DAO count methods."""
+    async def get_admin_stats(self, session: AsyncSession) -> dict[str, Any]:
+        """Aggregate platform-wide statistics using DAO methods."""
+        total_films = await self.film_dao.count(session)
+        total_reviews = await self.review_dao.count(session)
+        avg_rating = await self.review_dao.overall_average_rating(session)
+        top_reviewer = await self.review_dao.get_top_reviewer(session)
+        total_users = await self.dao.count(session)
         return {
-            "total_users": await self.dao.count(session),
-            "total_films": await self.film_dao.count(session),
-            "total_reviews": await self.review_dao.count(session),
+            "total_users": total_users,
+            "total_films": total_films,
+            "total_reviews": total_reviews,
+            "overall_average_rating": avg_rating,
+            "top_reviewer_username": top_reviewer,
             "uptime_status": "healthy",
         }
 
@@ -226,7 +289,6 @@ _default_user_service = UserService(
     dao=UserDAO(),
     film_dao=FilmDAO(),
     review_dao=ReviewDAO(),
-    refresh_token_dao=default_refresh_token_dao,
 )
 
 

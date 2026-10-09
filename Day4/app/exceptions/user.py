@@ -114,3 +114,19 @@ class TokenReusedError(AuthenticationError):
     status_code: int = status.HTTP_401_UNAUTHORIZED
     default_message: str = "Refresh token has already been used or revoked."
 
+
+class TokenRevokedError(AuthenticationError):
+    """Raised when a revoked or deleted refresh token is presented (HTTP 401)."""
+
+    status_code: int = status.HTTP_401_UNAUTHORIZED
+    default_message: str = "Refresh token has been revoked"
+
+    def __init__(
+        self,
+        message: str = "Refresh token has been revoked",
+        detail: Any = "Refresh token has been revoked",
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message=message, detail=detail, status_code=status_code)
+
+

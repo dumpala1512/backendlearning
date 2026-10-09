@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -14,7 +14,6 @@ from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 from app.core.project_config import DEBUG
 
-logger = logging.getLogger("film_review.database")
 
 
 class Base(DeclarativeBase):
@@ -42,20 +41,4 @@ async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
     expire_on_commit=False,                    # prevents detaching session objects from database after commit 
     autoflush=False,                           # prevents auto-flushing of session which can lead to unexpected queries
 )
-
-
-async def init_db(target_engine: AsyncEngine = engine) -> None:
-    """
-    Creates missing database tables defined in Base metadata if needed.
-    """
-    from app.models import Film, Review, User, Watchlist  # noqa: F401
-
-    async with target_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables verified/created via Base.metadata.create_all.")
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(init_db())
 

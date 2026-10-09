@@ -29,6 +29,7 @@ from app.exceptions.user import (
     InvalidTokenError,
     TokenExpiredError,
     TokenReusedError,
+    TokenRevokedError,
     UserAlreadyExistsError,
     UserNotFoundError,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "InvalidTokenError",
     "TokenExpiredError",
     "TokenReusedError",
+    "TokenRevokedError",
     "EXCEPTION_STATUS_MAPPINGS",
     "create_error_response",
     "register_exception_handlers",

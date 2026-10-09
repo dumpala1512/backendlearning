@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import project_config
-from app.dependencies import get_current_user, get_db, get_film_service, get_request_id
+from app.dependencies import get_current_user, get_db, get_film_service, get_request_id, require_role
 from app.schemas.common import MessageResponse
 from app.schemas.film import FilmCreate, FilmFilterQuery, FilmResponse, FilmUpdate
 from app.services.film_service import FilmService
@@ -72,7 +72,13 @@ async def get_film(
     return FilmResponse.model_validate(film)
 
 
-@router.post("", response_model=FilmResponse, status_code=status.HTTP_201_CREATED, summary="Create a new film")
+@router.post(
+    "",
+    response_model=FilmResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new film",
+    dependencies=[Depends(get_current_user), Depends(require_role("admin"))],
+)
 async def create_film(
     payload: FilmCreate,
     service: FilmService = Depends(get_film_service),
@@ -80,7 +86,7 @@ async def create_film(
     request_id: str = Depends(get_request_id),
 ) -> FilmResponse:
     """
-    Create a new film in PostgreSQL.
+    Create a new film in PostgreSQL (Admin only).
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
@@ -98,7 +104,12 @@ async def create_film(
     return FilmResponse.model_validate(film)
 
 
-@router.patch("/{film_id}", response_model=FilmResponse, summary="Partially update a film")
+@router.patch(
+    "/{film_id}",
+    response_model=FilmResponse,
+    summary="Partially update a film",
+    dependencies=[Depends(get_current_user), Depends(require_role("admin"))],
+)
 async def update_film(
     film_id: uuid.UUID,
     payload: FilmUpdate,
@@ -107,7 +118,7 @@ async def update_film(
     request_id: str = Depends(get_request_id),
 ) -> FilmResponse:
     """
-    Partially update an existing film in PostgreSQL.
+    Partially update an existing film in PostgreSQL (Admin only).
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(f"[{request_id}] update_film({film_id}) | DB active={db.is_active}")
@@ -119,7 +130,12 @@ async def update_film(
     return FilmResponse.model_validate(film)
 
 
-@router.delete("/{film_id}", response_model=MessageResponse, summary="Delete a film")
+@router.delete(
+    "/{film_id}",
+    response_model=MessageResponse,
+    summary="Delete a film",
+    dependencies=[Depends(get_current_user), Depends(require_role("admin"))],
+)
 async def delete_film(
     film_id: uuid.UUID,
     service: FilmService = Depends(get_film_service),
@@ -127,7 +143,7 @@ async def delete_film(
     request_id: str = Depends(get_request_id),
 ) -> MessageResponse:
     """
-    Soft delete a film by UUID ID.
+    Soft delete a film by UUID ID (Admin only).
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(f"[{request_id}] delete_film({film_id}) | DB active={db.is_active}")

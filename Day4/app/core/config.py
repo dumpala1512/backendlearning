@@ -21,8 +21,31 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Redis Configuration
+    REDIS_URL: str | None = None
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str | None = None
+    REDIS_DB: int = 0
+    CACHE_TTL_SECONDS: int = 300
+    CACHE_TTL: int = 300  # Alias for CACHE_TTL_SECONDS
+
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    @property
+    def refresh_token_ttl_seconds(self) -> int:
+        """Derived refresh token TTL in seconds matching JWT expiration."""
+        return self.REFRESH_TOKEN_EXPIRE_DAYS * 86400
+
+    @property
+    def redis_connection_url(self) -> str:
+        """Construct full Redis connection URL from components if REDIS_URL is not set."""
+        if self.REDIS_URL:
+            return self.REDIS_URL
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     model_config = SettingsConfigDict(
         env_file=(str(_ENV_PATH), ".env"),

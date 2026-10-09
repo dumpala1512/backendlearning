@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_user_service
+from app.exceptions.base import PermissionDeniedError
+from app.dependencies import get_current_user, get_db, get_user_service
 from app.schemas.user import (
+    AuthenticatedUser,
+    LogoutResponse,
     RefreshTokenRequest,
     TokenResponse,
     UserLoginRequest,
@@ -12,6 +16,8 @@ from app.schemas.user import (
     UserResponse,
 )
 from app.services.user_service import UserService
+
+logger = logging.getLogger("film_review.routers.auth")
 
 router = APIRouter(tags=["Authentication"])
 
@@ -36,7 +42,14 @@ async def register(
     """
     Register a new user account with secure bcrypt password hashing and database persistence.
     Public endpoint. Passwords are never stored in plaintext and hashes are never returned.
+    Admin accounts cannot be created via public registration.
     """
+    if payload.role.strip().lower() == "admin":
+        raise PermissionDeniedError(
+            "Creating admin accounts via public registration is prohibited. "
+            "Only one system administrator account exists."
+        )
+
     user = await service.register(
         session=db,
         username=payload.username,
@@ -69,12 +82,18 @@ async def login(
     longer-lived refresh token persisted server-side for replay protection.
     Public endpoint.
     """
+    identifier = payload.username or payload.email or "unknown"
+    logger.info(f"Login attempt received for '{identifier}'")
+
     access_token, refresh_token, user = await service.login(
         session=db,
         username=payload.username,
         email=payload.email,
         password=payload.password.get_secret_value(),
     )
+
+    logger.info(f"User '{user.username}' (id={user.id}, role={user.role}) successfully logged in")
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -113,3 +132,26 @@ async def refresh(
         access_token=new_access_token,
         token_type="bearer",
     )
+
+
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    summary="User logout",
+)
+@router.post(
+    "/auth/logout",
+    response_model=LogoutResponse,
+    include_in_schema=False,
+)
+async def logout(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    service: UserService = Depends(get_user_service),
+) -> LogoutResponse:
+    """
+    Log out the current authenticated user and revoke their refresh token in Redis.
+    Requires a valid access token in the Authorization header.
+    """
+    await service.logout(user_id=current_user.id)
+    return LogoutResponse(message="Logged out successfully")
+

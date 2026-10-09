@@ -148,18 +148,19 @@ class ReviewService:
         session: AsyncSession,
         review_id: uuid.UUID,
         user_id: uuid.UUID | None = None,
+        is_admin: bool = False,
         **updates,
     ) -> Review:
         """
         Update review content or rating adhering to Rule 2.
-        Rule 2: Only the original author may update review rating and review body.
+        Rule 2: Only the original author may update review rating and review body (unless admin).
         """
         review = await self.dao.get_by_id(session, review_id)
         if review is None:
             raise ReviewNotFoundError(review_id=review_id)
 
-        # Enforce Rule 2: Only the original author may update
-        if review.user_id is not None:
+        # Enforce Rule 2: Only the original author may update, unless admin
+        if not is_admin and review.user_id is not None:
             if user_id is None or review.user_id != user_id:
                 logger.warning(
                     "Unauthorized review update attempt on %s by user %s (author is %s)",
@@ -215,6 +216,14 @@ class ReviewService:
         film_id: uuid.UUID | None = None,
     ) -> list[Review]:
         return await self.dao.get_reviews_with_details(session=session, film_id=film_id)
+
+    async def overall_average_rating(self, session: AsyncSession) -> float | None:
+        """Calculate platform-wide overall average review rating."""
+        return await self.dao.overall_average_rating(session=session)
+
+    async def get_top_reviewer(self, session: AsyncSession) -> str | None:
+        """Find the username of the user who has submitted the most reviews."""
+        return await self.dao.get_top_reviewer(session=session)
 
 
 # Default singleton and module-level helpers for backward compatibility

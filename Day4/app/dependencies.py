@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,15 +67,22 @@ def get_user_dao() -> UserDAO:
     return UserDAO()
 
 
+from fastapi import Depends, Header, Request, status
 from app.core.security import decode_token
-from app.dao.refresh_token_dao import RefreshTokenDAO, default_refresh_token_dao
+from app.exceptions.base import PermissionDeniedError
 from app.exceptions.user import AuthenticationError, InvalidTokenError
 from app.schemas.user import AuthenticatedUser
 
 
-def get_refresh_token_dao() -> RefreshTokenDAO:
-    """Provide RefreshTokenDAO dependency."""
-    return default_refresh_token_dao
+from app.core.redis import get_redis_client
+from app.services.redis_service import RedisService
+
+
+def get_redis_service(
+    client: Any = Depends(get_redis_client),
+) -> RedisService:
+    """Provide RedisService with injected shared Redis client singleton."""
+    return RedisService(client=client)
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +91,10 @@ def get_refresh_token_dao() -> RefreshTokenDAO:
 def get_film_service(
     dao: FilmDAO = Depends(get_film_dao),
     review_dao: ReviewDAO = Depends(get_review_dao),
+    redis_service: RedisService = Depends(get_redis_service),
 ) -> FilmService:
-    """Provide FilmService with injected FilmDAO and ReviewDAO."""
-    return FilmService(dao=dao, review_dao=review_dao)
+    """Provide FilmService with injected FilmDAO, ReviewDAO, and RedisService."""
+    return FilmService(dao=dao, review_dao=review_dao, redis_service=redis_service)
 
 
 def get_review_service(
@@ -101,14 +109,14 @@ def get_user_service(
     dao: UserDAO = Depends(get_user_dao),
     film_dao: FilmDAO = Depends(get_film_dao),
     review_dao: ReviewDAO = Depends(get_review_dao),
-    refresh_token_dao: RefreshTokenDAO = Depends(get_refresh_token_dao),
+    redis_service: RedisService = Depends(get_redis_service),
 ) -> UserService:
-    """Provide UserService with injected UserDAO, FilmDAO, ReviewDAO, and RefreshTokenDAO."""
+    """Provide UserService with injected UserDAO, FilmDAO, ReviewDAO, and RedisService."""
     return UserService(
         dao=dao,
         film_dao=film_dao,
         review_dao=review_dao,
-        refresh_token_dao=refresh_token_dao,
+        redis_service=redis_service,
     )
 
 
@@ -159,3 +167,76 @@ async def get_current_user(
         username=username,
         role=role,
     )
+
+
+# ---------------------------------------------------------------------------
+# Role Enforcement Dependencies (RBAC)
+# ---------------------------------------------------------------------------
+ROLE_HIERARCHY: dict[str, int] = {
+    "viewer": 1,
+    "critic": 2,
+    "admin": 3,
+}
+
+# Compatibility aliases mapping legacy names to standard canonical roles
+ROLE_ALIASES: dict[str, str] = {
+    "user": "viewer",
+    "member": "viewer",
+}
+
+
+class RoleChecker:
+    """
+    Role enforcement dependency that accepts a required role (or allowed roles)
+    and raises an HTTP 403 Forbidden response (PermissionDeniedError)
+    if the authenticated user's role does not satisfy it.
+    """
+
+    def __init__(self, *required_roles: str | list[str] | tuple[str, ...]) -> None:
+        flat_roles: list[str] = []
+        for r in required_roles:
+            if isinstance(r, (list, tuple, set)):
+                flat_roles.extend(r)
+            else:
+                flat_roles.append(r)
+        self.required_roles = [r.strip().lower() for r in flat_roles]
+        self.min_level = min(
+            (ROLE_HIERARCHY.get(r, 1) for r in self.required_roles),
+            default=1,
+        )
+
+    async def __call__(
+        self,
+        current_user: AuthenticatedUser = Depends(get_current_user),
+    ) -> AuthenticatedUser:
+        raw_role = (current_user.role or "").strip().lower()
+        user_role = ROLE_ALIASES.get(raw_role, raw_role)
+        user_level = ROLE_HIERARCHY.get(user_role, 1)
+
+        satisfies = (
+            user_role in self.required_roles
+            or user_role == "admin"
+            or user_level >= self.min_level
+        )
+
+        if not satisfies:
+            req_str = ", ".join(self.required_roles)
+            raise PermissionDeniedError(
+                message=f"Access forbidden: role '{user_role}' does not satisfy required role '{req_str}'.",
+                detail={
+                    "user_role": user_role,
+                    "required_roles": self.required_roles,
+                },
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return current_user
+
+
+def require_role(*required_roles: str | list[str] | tuple[str, ...]) -> RoleChecker:
+    """
+    Factory function for role enforcement dependency.
+    Accepts required role(s), e.g. require_role("admin"), require_role("critic"),
+    or require_role(["critic", "admin"]).
+    """
+    return RoleChecker(*required_roles)
+

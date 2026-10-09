@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 
 from app.models.film import Film
 from app.models.review import Review, ReviewORM
+from app.models.user import User
 
 
 class ReviewDAO:
@@ -182,6 +183,47 @@ class ReviewDAO:
             query = query.join(Film, Review.film_id == Film.id).where(Film.is_active.is_(True))
         result = await session.execute(query)
         return result.scalar_one() or 0
+
+    async def overall_average_rating(self, session: AsyncSession, active_only: bool = True) -> float | None:
+        """
+        Calculate the overall average rating across all reviews.
+        Returns float rounded to 2 decimal places or None if no reviews exist.
+        """
+        query = select(func.avg(Review.rating))
+        if active_only:
+            query = query.join(Film, Review.film_id == Film.id).where(Film.is_active.is_(True))
+        result = await session.execute(query)
+        avg = result.scalar_one_or_none()
+        if avg is None and active_only:
+            query_fb = select(func.avg(Review.rating))
+            result_fb = await session.execute(query_fb)
+            avg = result_fb.scalar_one_or_none()
+        return round(float(avg), 2) if avg is not None else None
+
+    async def get_top_reviewer(self, session: AsyncSession) -> str | None:
+        """
+        Find the username of the user who has submitted the most reviews.
+        """
+        query = (
+            select(User.username)
+            .join(Review, Review.user_id == User.id)
+            .group_by(User.id, User.username)
+            .order_by(func.count(Review.id).desc())
+            .limit(1)
+        )
+        result = await session.execute(query)
+        top_user = result.scalar_one_or_none()
+        if not top_user:
+            query_disp = (
+                select(Review.reviewer_display_name)
+                .where(Review.reviewer_display_name.is_not(None))
+                .group_by(Review.reviewer_display_name)
+                .order_by(func.count(Review.id).desc())
+                .limit(1)
+            )
+            res_disp = await session.execute(query_disp)
+            top_user = res_disp.scalar_one_or_none()
+        return top_user
 
 
 # Default singleton and module-level functions for backward compatibility

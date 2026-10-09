@@ -81,8 +81,93 @@ app.include_router(health_router)
 # Versioned API routes under /api/v1
 app.include_router(api_v1_router, prefix=project_config.API_V1_PREFIX)
 
+# Root-level route aliases for /me and /admin/stats
+from app.routers import users as users_router_module
+app.include_router(users_router_module.router, include_in_schema=False)
+
+# Root-level route aliases for /login, /register, /refresh, /logout
+from app.routers import auth as auth_router_module
+app.include_router(auth_router_module.router, include_in_schema=False)
+
 # Centralized domain exception handlers
 register_exception_handlers(app)
+
+
+from fastapi.openapi.utils import get_openapi
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+
+    # Ensure UserLoginRequest schema and endpoint examples show email or username first, then password
+    schemas = openapi_schema.get("components", {}).get("schemas", {})
+    if "UserLoginRequest" in schemas:
+        schemas["UserLoginRequest"]["example"] = {
+            "email_or_username": "bob@example.com",
+            "password": "CanWeFixIt123!",
+        }
+        schemas["UserLoginRequest"]["examples"] = [
+            {
+                "email_or_username": "bob@example.com",
+                "password": "CanWeFixIt123!",
+            },
+            {
+                "username": "bob_builder",
+                "password": "CanWeFixIt123!",
+            },
+            {
+                "email": "bob@example.com",
+                "password": "CanWeFixIt123!",
+            },
+        ]
+
+    for path_key in ("/api/v1/login", "/login"):
+        post_op = openapi_schema.get("paths", {}).get(path_key, {}).get("post")
+        if post_op and "requestBody" in post_op:
+            content = post_op["requestBody"].get("content", {})
+            if "application/json" in content:
+                content["application/json"]["example"] = {
+                    "email_or_username": "bob@example.com",
+                    "password": "CanWeFixIt123!",
+                }
+                content["application/json"]["examples"] = {
+                    "email_or_username": {
+                        "summary": "Email or Username Login",
+                        "value": {
+                            "email_or_username": "bob@example.com",
+                            "password": "CanWeFixIt123!",
+                        },
+                    },
+                    "username_only": {
+                        "summary": "Username Login",
+                        "value": {
+                            "username": "bob_builder",
+                            "password": "CanWeFixIt123!",
+                        },
+                    },
+                    "email_only": {
+                        "summary": "Email Login",
+                        "value": {
+                            "email": "bob@example.com",
+                            "password": "CanWeFixIt123!",
+                        },
+                    },
+                }
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 if __name__ == "__main__":

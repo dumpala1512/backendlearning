@@ -29,8 +29,12 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verify a plaintext password against a stored bcrypt hash.
+    Safely returns False if the hash is malformed or unidentifiable.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
 def create_access_token(
@@ -39,7 +43,7 @@ def create_access_token(
 ) -> str:
     """
     Generate a signed JWT access token.
-    Claims include sub (user id), username, role, type="access", iat, exp, and jti.
+    Claims include sub (user id), username, role, type="access", iat, exp.
     """
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -54,11 +58,8 @@ def create_access_token(
             "type": "access",
             "iat": int(now.timestamp()),
             "exp": int(expire.timestamp()),
-            "jti": str(uuid.uuid4()),
         }
     )
-    if "sub" in to_encode:
-        to_encode["sub"] = str(to_encode["sub"]) 
 
     return jwt.encode(to_encode, settings.TOKEN_SECRET_KEY, algorithm=ALGORITHM)
 
@@ -66,11 +67,10 @@ def create_access_token(
 def create_refresh_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
-    jti: str | None = None,
 ) -> str:
     """
     Generate a signed JWT refresh token.
-    Claims include sub (user id), username, role, type="refresh", iat, exp, and jti.
+    Claims include sub (user id), username, role, type="refresh", iat, exp.
     """
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -79,17 +79,14 @@ def create_refresh_token(
     else:
         expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
-    token_jti = jti or str(uuid.uuid4())
     to_encode.update(
         {
             "type": "refresh",
+            "jti": str(uuid.uuid4()),
             "iat": int(now.timestamp()),
             "exp": int(expire.timestamp()),
-            "jti": token_jti,
         }
     )
-    if "sub" in to_encode:
-        to_encode["sub"] = str(to_encode["sub"])
 
     return jwt.encode(to_encode, settings.TOKEN_SECRET_KEY, algorithm=ALGORITHM)
 

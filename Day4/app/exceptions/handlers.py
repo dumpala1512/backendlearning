@@ -55,7 +55,7 @@ def create_error_response(
     status_code: int,
     error_type: str,
     message: str,
-    detail: dict[str, Any] | None = None,
+    detail: Any = None,
 ) -> JSONResponse:
     """
     Build standardized JSON error response body.

@@ -92,14 +92,14 @@ SEED_USERS = [
         "username": "elena_cinephile",
         "full_name": "Elena Rostova",
         "email": "elena.member@movielovers.net",
-        "role": "member",
+        "role": "viewer",
         "hashed_password": hash_password("MemberPass123!"),
     },
     {
         "username": "alex_viewer",
         "full_name": "Alex Mercer",
         "email": "alex.viewer@streamguide.io",
-        "role": "user",
+        "role": "viewer",
         "hashed_password": hash_password("UserPass123!"),
     },
 ]
@@ -296,6 +296,7 @@ async def seed_users(session) -> dict[str, uuid.UUID]:
             user.full_name = user_data["full_name"]
             user.email = user_data["email"]
             user.role = user_data["role"]
+            user.hashed_password = user_data["hashed_password"]
             existing_count += 1
             logger.info(f"  [.] User already exists: '{user.username}' (id={user.id})")
 

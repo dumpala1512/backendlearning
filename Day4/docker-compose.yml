@@ -19,6 +19,22 @@ services:
     networks:
       - film-review-net
 
+  redis:
+    image: redis:7-alpine
+    container_name: film-review-redis-day4
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_day4:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - film-review-net
+
   api:
     build:
       context: .
@@ -32,8 +48,12 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -47,6 +67,8 @@ services:
 
 volumes:
   postgres_data_day4:
+    driver: local
+  redis_data_day4:
     driver: local
 
 networks:

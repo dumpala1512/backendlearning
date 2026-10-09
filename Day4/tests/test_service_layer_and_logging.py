@@ -79,13 +79,14 @@ async def test_rule_2_route_permission_denied_on_update_returns_403(client: Asyn
     author_id = str(uuid.uuid4())
     other_user_id = str(uuid.uuid4())
 
-    author_token = create_access_token({"sub": author_id, "username": "tyler", "role": "user"})
-    other_user_token = create_access_token({"sub": other_user_id, "username": "narrator", "role": "user"})
+    author_token = create_access_token({"sub": author_id, "username": "tyler", "role": "critic"})
+    other_user_token = create_access_token({"sub": other_user_id, "username": "narrator", "role": "critic"})
+    admin_token = create_access_token({"sub": str(uuid.uuid4()), "username": "admin_user", "role": "admin"})
 
-    # Create film
+    # Create film with admin token
     film_res = await client.post(
         "/api/v1/films",
-        headers={"Authorization": f"Bearer {author_token}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "title": "Fight Club",
             "director": "David Fincher",

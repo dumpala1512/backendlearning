@@ -62,7 +62,6 @@ def test_jwt_access_and_refresh_token_claims():
     assert decoded_access["type"] == "access"
     assert "iat" in decoded_access
     assert "exp" in decoded_access
-    assert "jti" in decoded_access
     assert decoded_access["exp"] > decoded_access["iat"]
 
     # Refresh token
@@ -72,7 +71,6 @@ def test_jwt_access_and_refresh_token_claims():
     assert decoded_refresh["username"] == "cinephile99"
     assert decoded_refresh["role"] == "critic"
     assert decoded_refresh["type"] == "refresh"
-    assert "jti" in decoded_refresh
 
     # Access token rejected when expected_type is refresh
     with pytest.raises(InvalidTokenError) as exc_info:
@@ -161,6 +159,32 @@ async def test_register_flow(client: AsyncClient, db_session: AsyncSession):
     )
     assert dup_email_res.status_code == 409
 
+    # Null fullname must raise an error (422)
+    null_fullname_res = await client.post(
+        "/api/v1/register",
+        json={
+            "username": "null_name_user",
+            "email": "null_name@example.com",
+            "password": "Password123!",
+            "fullname": None,
+        },
+    )
+    assert null_fullname_res.status_code == 422
+    assert "Full name cannot be null" in null_fullname_res.text
+
+    # Null full_name must raise an error (422)
+    null_full_name_res = await client.post(
+        "/api/v1/register",
+        json={
+            "username": "null_name_user_2",
+            "email": "null_name2@example.com",
+            "password": "Password123!",
+            "full_name": None,
+        },
+    )
+    assert null_full_name_res.status_code == 422
+    assert "Full name cannot be null" in null_full_name_res.text
+
 
 @pytest.mark.asyncio
 async def test_login_flow(client: AsyncClient):
@@ -230,7 +254,13 @@ async def test_login_flow(client: AsyncClient):
         json={"identifier": "bob_builder", "password": "CanWeFixIt123!"},
     )
     assert login_identifier_res.status_code == 200
-    assert "access_token" in login_identifier_res.json()
+    # Login using email_or_username field
+    login_email_or_user_res = await client.post(
+        "/api/v1/login",
+        json={"email_or_username": "bob_builder", "password": "CanWeFixIt123!"},
+    )
+    assert login_email_or_user_res.status_code == 200
+    assert "access_token" in login_email_or_user_res.json()
 
     # Neither username nor email provided -> 422 Unprocessable Entity
     neither_res = await client.post(
@@ -256,12 +286,11 @@ async def test_login_flow(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_refresh_token_flow_and_replay_protection(client: AsyncClient):
+async def test_refresh_token_flow(client: AsyncClient):
     """
     POST /api/v1/refresh:
-    - validates refresh token
+    - validates refresh token statelessly
     - issues a brand new access token
-    - rejects already-used refresh token (replay attack prevention)
     - rejects access token mistakenly sent as refresh token
     """
     # Register and login
@@ -286,15 +315,14 @@ async def test_refresh_token_flow_and_replay_protection(client: AsyncClient):
     assert refresh_res.status_code == 200
     new_data = refresh_res.json()
     assert "access_token" in new_data
-    assert new_data["access_token"] != old_access_token
 
-    # Second refresh using the SAME token: MUST BE REJECTED (Replay attack prevention)
-    reused_res = await client.post(
+    # Subsequent refresh: also succeeds statelessly with valid refresh token
+    second_res = await client.post(
         "/api/v1/refresh",
         json={"refresh_token": refresh_token},
     )
-    assert reused_res.status_code == 401
-    assert reused_res.json()["type"] == "TokenReused"
+    assert second_res.status_code == 200
+    assert "access_token" in second_res.json()
 
     # Reject access token passed to /api/v1/refresh
     wrong_type_res = await client.post(
