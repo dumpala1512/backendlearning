@@ -102,6 +102,13 @@ SEED_USERS = [
         "role": "viewer",
         "hashed_password": hash_password("UserPass123!"),
     },
+    {
+        "username": "bob_builder",
+        "full_name": "Bob The Builder",
+        "email": "bob@example.com",
+        "role": "critic",
+        "hashed_password": hash_password("CanWeFixIt123!"),
+    },
 ]
 
 SEED_FILMS = [

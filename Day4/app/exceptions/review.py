@@ -33,6 +33,10 @@ class ReviewNotFoundError(EntityNotFoundError):
             status_code=status_code,
         )
 
+    @property
+    def resource_id(self) -> uuid.UUID | str:
+        return self.review_id
+
 
 class ReviewAlreadyExistsError(DuplicateEntityError):
     """
@@ -101,6 +105,43 @@ class ReviewPermissionDeniedError(PermissionDeniedError):
             status_code=status_code,
         )
 
+    @property
+    def resource_id(self) -> uuid.UUID | str:
+        return self.review_id
+
+
+class UnauthorizedReviewDeleteError(PermissionDeniedError):
+    """Raised when a user attempts to delete a review they did not author (HTTP 403)."""
+
+    status_code: int = status.HTTP_403_FORBIDDEN
+    default_message: str = "Only the original author or an admin may delete this review."
+
+    def __init__(
+        self,
+        review_id: uuid.UUID | str,
+        user_id: uuid.UUID | str | None = None,
+        message: str | None = None,
+        detail: dict[str, Any] | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        self.review_id = review_id
+        self.user_id = user_id
+        user_suffix = f" by user {user_id}" if user_id else ""
+        details: dict[str, Any] = {"review_id": str(review_id)}
+        if user_id:
+            details["user_id"] = str(user_id)
+        details.update(detail or {})
+        super().__init__(
+            message=message
+            or f"Permission denied: only the original author may delete review {review_id}{user_suffix}.",
+            detail=details,
+            status_code=status_code,
+        )
+
+    @property
+    def resource_id(self) -> uuid.UUID | str:
+        return self.review_id
+
 
 class InvalidReviewRatingError(ValidationError):
     """Raised when a review rating falls outside the valid range 1-10 (HTTP 400)."""
@@ -131,4 +172,9 @@ class InvalidReviewRatingError(ValidationError):
             },
             status_code=status_code,
         )
+
+
+DuplicateReviewError = ReviewAlreadyExistsError
+UnauthorizedReviewUpdateError = ReviewPermissionDeniedError
+
 

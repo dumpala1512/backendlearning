@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions.base import PermissionDeniedError
@@ -145,13 +145,16 @@ async def refresh(
     include_in_schema=False,
 )
 async def logout(
+    request: Request,
     current_user: AuthenticatedUser = Depends(get_current_user),
     service: UserService = Depends(get_user_service),
 ) -> LogoutResponse:
     """
-    Log out the current authenticated user and revoke their refresh token in Redis.
+    Log out the current authenticated user and revoke their session in Redis.
     Requires a valid access token in the Authorization header.
     """
-    await service.logout(user_id=current_user.id)
+    session_id = request.headers.get("X-Session-ID") or request.query_params.get("session_id")
+    session_key = f"session:{session_id}" if session_id else f"session:{current_user.id}"
+    await service.logout(user_id=current_user.id, session_key=session_key)
     return LogoutResponse(message="Logged out successfully")
 

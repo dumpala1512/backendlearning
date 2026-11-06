@@ -27,6 +27,10 @@ class FilmNotFoundError(EntityNotFoundError):
             status_code=status_code,
         )
 
+    @property
+    def resource_id(self) -> uuid.UUID | str:
+        return self.film_id
+
 
 class FilmHasActiveReviewsError(DomainError):
     """

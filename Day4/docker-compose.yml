@@ -16,6 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 5s
     networks:
       - film-review-net
 
@@ -32,6 +33,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 3s
     networks:
       - film-review-net
 
@@ -40,28 +42,56 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: film-review-platform-day4
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - .env
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TOKEN_SECRET_KEY=film-review-platform-super-secret-signing-key-day4-2026-secure
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - CACHE_TTL_SECONDS=300
+      - LOG_LEVEL=INFO
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\")' || exit 1"]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - film-review-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: film-review-frontend-day4
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - PORT=3000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - film-review-net
 

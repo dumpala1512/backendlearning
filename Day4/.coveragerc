@@ -1,0 +1,21 @@
+[run]
+source = app
+branch = True
+omit =
+    */alembic/*
+    */migrations/*
+    */__pycache__/*
+    */tests/*
+    */scripts/*
+    */ui/*
+    *conftest.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    @(abc\.)?abstractmethod

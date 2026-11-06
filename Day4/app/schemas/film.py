@@ -49,6 +49,13 @@ class FilmResponse(FilmBase):
 
     id: uuid.UUID = Field(..., strict=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    total_reviews: int = Field(default=0, ge=0)
+    average_rating: float | None = Field(default=None)
+
+    @computed_field
+    @property
+    def review_count(self) -> int:
+        return self.total_reviews
 
     @computed_field
     @property
@@ -61,18 +68,65 @@ Film = FilmResponse
 
 
 class FilmFilterQuery(AppBaseModel):
-    """Filter parameters demonstrating @model_validator relationship validation."""
+    """
+    Typed query schema for film listing, pagination, and multi-field filtering.
+    Standardized on 'limit' across both offset and cursor pagination.
+    Supports:
+    - genre: exact match
+    - year_from: minimum release year
+    - year_to: maximum release year
+    - director: case-insensitive substring
+    - page: 1-indexed page number
+    - limit: maximum items per page
+    - page_size: optional alias for limit (for backward compatibility)
+    - cursor: opaque cursor token for cursor-based pagination
+    """
 
     genre: str | None = None
-    start_year: int | None = Field(default=None, ge=1888, le=2100)
-    end_year: int | None = Field(default=None, ge=1888, le=2100)
-    limit: int = Field(default=10, ge=1, le=100)
+    year_from: int | None = Field(default=None, ge=1888, le=2100)
+    year_to: int | None = Field(default=None, ge=1888, le=2100)
+    director: str | None = None
+    page: int = Field(default=1, ge=1)
+    limit: int = Field(default=10, ge=1, le=100, description="Maximum items per page")
+    page_size: int | None = Field(default=None, ge=1, le=100, description="Alias for limit")
+    cursor: str | None = None
 
     @model_validator(mode="after")
-    def validate_year_range(self) -> "FilmFilterQuery":
-        if self.start_year is not None and self.end_year is not None:
-            if self.start_year > self.end_year:
+    def validate_filters(self) -> "FilmFilterQuery":
+        # Standardize limit: if legacy page_size is provided, map to limit
+        if self.page_size is not None:
+            self.limit = self.page_size
+        else:
+            self.page_size = self.limit
+
+        if self.year_from is not None and self.year_to is not None:
+            if self.year_from > self.year_to:
                 raise ValueError(
-                    f"start_year ({self.start_year}) cannot be greater than end_year ({self.end_year})"
+                    f"year_from ({self.year_from}) cannot be greater than year_to ({self.year_to})"
                 )
-        return self 
+        return self
+
+
+class PaginatedFilmResponse(AppBaseModel):
+    """Offset-based paginated response model for film listing."""
+
+    page: int = Field(..., ge=1, description="Current page number")
+    limit: int = Field(default=10, ge=1, description="Number of records per page")
+    total: int = Field(..., ge=0, description="Total matching records across all pages")
+    total_pages: int = Field(..., ge=0, description="Total calculated pages")
+    total_records: int = Field(..., ge=0, description="Alias for total matching records")
+    items: list[FilmResponse] = Field(default_factory=list, description="Films belonging to requested page")
+
+    @computed_field
+    @property
+    def page_size(self) -> int:
+        """Alias for limit to maintain backward compatibility."""
+        return self.limit
+
+
+class CursorFilmResponse(AppBaseModel):
+    """Cursor-based paginated response model for film listing."""
+
+    items: list[FilmResponse] = Field(default_factory=list, description="Films for the current cursor page")
+    next_cursor: str | None = Field(default=None, description="Opaque cursor token for the next page, or null if end of dataset")
+    limit: int = Field(default=10, description="Maximum items per page") 

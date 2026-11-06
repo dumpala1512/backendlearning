@@ -8,7 +8,7 @@ from app.core import project_config
 from app.core.lifespan import lifespan
 from app.exceptions.handlers import register_exception_handlers
 from app.logging.config import configure_logging
-from app.middleware.request_id import RequestIDMiddleware
+from app.middleware import register_middlewares
 from app.routers.api import api_v1_router
 from app.routers.health import router as health_router
 
@@ -63,23 +63,32 @@ app = FastAPI(
     openapi_tags=openapi_tags,
 )
 
-# Apply CORS middleware configured from static project settings
+# Apply CORS middleware with strict allowed origin, methods, and headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=project_config.ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=project_config.CORS_ALLOWED_METHODS,
+    allow_headers=project_config.CORS_ALLOWED_HEADERS,
+    expose_headers=project_config.CORS_EXPOSE_HEADERS,
 )
 
-# Request-scoped logging & tracing middleware
-app.add_middleware(RequestIDMiddleware)
+
+# Register HTTP middlewares (Response Time & Request ID tracing) from app.middleware
+register_middlewares(app)
+
 
 # Root-level health endpoint: GET /health
 app.include_router(health_router)
 
 # Versioned API routes under /api/v1
 app.include_router(api_v1_router, prefix=project_config.API_V1_PREFIX)
+
+# Root-level route aliases for /films and /films/{film_id}/reviews
+from app.routers import films as films_router_module
+from app.routers import reviews as reviews_router_module
+app.include_router(films_router_module.router, include_in_schema=False)
+app.include_router(reviews_router_module.router, include_in_schema=False)
 
 # Root-level route aliases for /me and /admin/stats
 from app.routers import users as users_router_module
@@ -88,6 +97,10 @@ app.include_router(users_router_module.router, include_in_schema=False)
 # Root-level route aliases for /login, /register, /refresh, /logout
 from app.routers import auth as auth_router_module
 app.include_router(auth_router_module.router, include_in_schema=False)
+
+# Dedicated server-rendered HTML UI routes under /ui (Jinja2 + HTMX)
+from app.ui.films import router as ui_films_router
+app.include_router(ui_films_router, prefix="/ui")
 
 # Centralized domain exception handlers
 register_exception_handlers(app)

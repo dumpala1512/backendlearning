@@ -1,0 +1,39 @@
+{% if films %}
+  <div class="films-grid" id="films-grid">
+    {% for film in films %}
+      <article class="film-card" id="film-card-{{ film.id }}">
+        <div class="film-card-header">
+          <h3 class="film-title">{{ film.title }}</h3>
+          <span class="film-genre-badge">{{ film.genre }}</span>
+        </div>
+        <div class="film-card-body">
+          <div class="film-meta-row">
+            <span class="film-meta-label">Release Year:</span>
+            <span class="film-meta-value">{{ film.release_year }}</span>
+          </div>
+          <div class="film-meta-row">
+            <span class="film-meta-label">Genre:</span>
+            <span class="film-meta-value">{{ film.genre }}</span>
+          </div>
+          <div class="film-meta-row">
+            <span class="film-meta-label">Average Rating:</span>
+            <span class="film-meta-value rating-badge">
+              {% if film.average_rating is not none %}
+                ★ {{ film.average_rating }} / 5
+              {% else %}
+                N/A
+              {% endif %}
+            </span>
+          </div>
+          {% if film.description %}
+            <p class="film-description">{{ film.description }}</p>
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="no-results-state" id="no-matching-films">
+    <p>No matching films found.</p>
+  </div>
+{% endif %}

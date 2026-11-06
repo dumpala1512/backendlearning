@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from contextvars import ContextVar
 from fastapi import Request, Response
@@ -17,6 +18,41 @@ def get_current_request_id() -> str | None:
     return request_id_ctx_var.get()
 
 
+async def request_id_middleware(request: Request, call_next) -> Response:
+    """
+    Request ID Middleware:
+    - Generates unique request ID (uuid.uuid4()) for every incoming request (or preserves incoming X-Request-ID).
+    - Stores request ID on request.state.request_id and context var.
+    - Adds X-Request-ID response header.
+    - Logs request start and completion with request ID.
+    """
+    request_id = (
+        request.headers.get("X-Request-ID")
+        or request.headers.get("x-request-id")
+        or str(uuid.uuid4())
+    )
+    request.state.request_id = request_id
+    token = request_id_ctx_var.set(request_id)
+
+    logger.info(
+        f"[Request ID: {request_id}] Incoming {request.method} {request.url.path}",
+        extra={"request_id": request_id, "path": request.url.path, "method": request.method},
+    )
+
+    start_time = time.perf_counter()
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            f"[Request ID: {request_id}] Completed in {duration_ms:.2f} ms",
+            extra={"request_id": request_id, "status_code": response.status_code, "duration_ms": duration_ms},
+        )
+        return response
+    finally:
+        request_id_ctx_var.reset(token)
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """
     Middleware that ensures every HTTP request has a unique request ID.
@@ -24,26 +60,4 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        # Extract existing request ID or generate a new UUID4
-        request_id = (
-            request.headers.get("X-Request-ID")
-            or request.headers.get("x-request-id")
-            or str(uuid.uuid4())
-        )
-
-        token = request_id_ctx_var.set(request_id)
-        request.state.request_id = request_id
-
-        logger.info(
-            "HTTP request received: %s %s",
-            request.method,
-            request.url.path,
-            extra={"path": request.url.path, "method": request.method},
-        )
-
-        try:
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = request_id
-            return response
-        finally:
-            request_id_ctx_var.reset(token)
+        return await request_id_middleware(request, call_next)

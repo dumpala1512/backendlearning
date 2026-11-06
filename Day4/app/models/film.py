@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -41,6 +41,26 @@ class Film(Base):
         server_default=func.now(),
         nullable=False,
     )
+    total_reviews: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+    average_rating: Mapped[float | None] = mapped_column(
+        Float,
+        default=None,
+        nullable=True,
+    )
+
+    @property
+    def review_count(self) -> int:
+        """Alias property matching total_reviews."""
+        return self.total_reviews
+
+    @review_count.setter
+    def review_count(self, value: int) -> None:
+        self.total_reviews = value
 
     # Relationship: A Film has many Reviews
     reviews: Mapped[list[Review]] = relationship(

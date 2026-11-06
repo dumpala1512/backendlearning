@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import logging
 import uuid
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import project_config
 from app.dependencies import get_current_user, get_db, get_film_service, get_request_id, require_role
 from app.schemas.common import MessageResponse
-from app.schemas.film import FilmCreate, FilmFilterQuery, FilmResponse, FilmUpdate
+from app.schemas.film import (
+    CursorFilmResponse,
+    FilmCreate,
+    FilmFilterQuery,
+    FilmResponse,
+    FilmUpdate,
+    PaginatedFilmResponse,
+)
 from app.services.film_service import FilmService
 
 logger = logging.getLogger("film_review.routers.films")
@@ -16,41 +23,37 @@ logger = logging.getLogger("film_review.routers.films")
 router = APIRouter(prefix="/films", tags=["Films"], dependencies=[Depends(get_current_user)])
 
 
-@router.get("", response_model=list[FilmResponse], summary="List all films")
+@router.get(
+    "",
+    response_model=PaginatedFilmResponse | CursorFilmResponse,
+    summary="List films with pagination and dynamic filtering",
+)
 async def list_films(
-    genre: str | None = Query(None, description="Filter films by genre"),
-    start_year: int | None = Query(None, ge=1888, le=2100, description="Filter by minimum release year"),
-    end_year: int | None = Query(None, ge=1888, le=2100, description="Filter by maximum release year"),
-    limit: int = Query(10, ge=1, le=100, description="Max number of films to return"),
+    request: Request,
+    filters: FilmFilterQuery = Depends(),
     service: FilmService = Depends(get_film_service),
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
-) -> list[FilmResponse]:
+) -> PaginatedFilmResponse | CursorFilmResponse:
     """
-    Retrieve all films with optional genre and validated year range filters.
+    Retrieve films with offset-based or cursor-based pagination and dynamic multi-field filtering.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
-        f"[{request_id}] list_films called | API {project_config.API_VERSION} | "
+        f"[{request_id}] list_films called | filters={filters.model_dump(exclude_none=True)} | "
         f"DB Session active={db.is_active}"
     )
 
-    # Validate range filters via schema
-    FilmFilterQuery(
-        genre=genre,
-        start_year=start_year,
-        end_year=end_year,
-        limit=limit,
-    )
+    if filters.cursor is not None or "cursor" in request.query_params:
+        return await service.list_films_cursor(
+            session=db,
+            filters=filters,
+        )
 
-    films = await service.list_films(
+    return await service.list_films_paginated(
         session=db,
-        genre=genre,
-        year_from=start_year,
-        year_to=end_year,
-        limit=limit,
+        filters=filters,
     )
-    return [FilmResponse.model_validate(f) for f in films]
 
 
 @router.get("/{film_id}", response_model=FilmResponse, summary="Get film by ID")

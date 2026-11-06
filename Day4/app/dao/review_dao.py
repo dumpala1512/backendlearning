@@ -1,9 +1,8 @@
-from __future__ import annotations
-
-from typing import Sequence
+from datetime import datetime
+from typing import Any, Sequence
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -19,23 +18,139 @@ class ReviewDAO:
     Uses UUID for review_id, film_id, and user_id.
     """
 
+    def _build_review_filter_conditions(
+        self,
+        film_id: uuid.UUID,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list[Any]:
+        """
+        Dynamically build review filter conditions at runtime.
+        Only supplied filter criteria are appended and executed in a single where() call.
+        """
+        conditions: list[Any] = [Review.film_id == film_id]
+        if min_rating is not None:
+            conditions.append(Review.rating >= min_rating)
+        if max_rating is not None:
+            conditions.append(Review.rating <= max_rating)
+
+        author_filter = reviewer or username
+        if author_filter is not None and author_filter.strip():
+            term = f"%{author_filter.strip()}%"
+            conditions.append(
+                or_(
+                    Review.reviewer_display_name.ilike(term),
+                    Review.user.has(User.username.ilike(term)),
+                )
+            )
+
+        if date_from is not None:
+            conditions.append(Review.created_at >= date_from)
+        if date_to is not None:
+            conditions.append(Review.created_at <= date_to)
+
+        return conditions
+
+    async def list_reviews_paginated(
+        self,
+        session: AsyncSession,
+        film_id: uuid.UUID,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = 1,
+        limit: int = 10,
+        page_size: int | None = None,
+    ) -> tuple[list[Review], int]:
+        """
+        Perform offset-based pagination directly in SQL using OFFSET and LIMIT for reviews.
+        Computes total matching record count via efficient COUNT query.
+        Applies eager loading using joinedload to eliminate N+1 queries.
+        Standardized on `limit` with `page_size` alias.
+        """
+        effective_limit = page_size if page_size is not None else limit
+        conditions = self._build_review_filter_conditions(
+            film_id=film_id,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            reviewer=reviewer,
+            username=username,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        # 1. Efficient count query for matching reviews
+        count_query = select(func.count(Review.id)).where(*conditions)
+        count_res = await session.execute(count_query)
+        total = count_res.scalar_one() or 0
+
+        # 2. Paginated data query using SQL OFFSET and LIMIT with eager loading
+        query = (
+            select(Review)
+            .options(
+                joinedload(Review.user),
+                joinedload(Review.film),
+            )
+            .where(*conditions)
+        )
+        offset_val = max(0, (page - 1) * effective_limit)
+        query = (
+            query.order_by(Review.created_at.desc(), Review.id.desc())
+            .offset(offset_val)
+            .limit(effective_limit)
+        )
+
+        result = await session.execute(query)
+        reviews = list(result.scalars().all())
+        return reviews, total
+
     async def list_reviews(
         self,
         session: AsyncSession,
         film_id: uuid.UUID,
         min_rating: int | None = None,
         max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Review]:
         """
         Return all reviews for a film, newest first (.order_by(Review.created_at.desc())).
-        Supports optional min_rating and max_rating filters.
+        Supports optional min_rating, max_rating, reviewer, date_from, and date_to filters.
+        Eagerly loads user and film relationships to eliminate N+1 queries.
         """
-        query = select(Review).where(Review.film_id == film_id)
-        if min_rating is not None:
-            query = query.where(Review.rating >= min_rating)
-        if max_rating is not None:
-            query = query.where(Review.rating <= max_rating)
-        query = query.order_by(Review.created_at.desc(), Review.id.desc())
+        conditions = self._build_review_filter_conditions(
+            film_id=film_id,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            reviewer=reviewer,
+            username=username,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        query = (
+            select(Review)
+            .options(
+                joinedload(Review.user),
+                joinedload(Review.film),
+            )
+            .where(*conditions)
+            .order_by(Review.created_at.desc(), Review.id.desc())
+        )
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await session.execute(query)
         return list(result.scalars().all())
@@ -46,6 +161,10 @@ class ReviewDAO:
         film_id: uuid.UUID,
         min_rating: int | None = None,
         max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> list[Review]:
         """Alias for list_reviews."""
         return await self.list_reviews(
@@ -53,6 +172,10 @@ class ReviewDAO:
             film_id=film_id,
             min_rating=min_rating,
             max_rating=max_rating,
+            reviewer=reviewer,
+            username=username,
+            date_from=date_from,
+            date_to=date_to,
         )
 
     async def average_rating(
@@ -68,6 +191,18 @@ class ReviewDAO:
         result = await session.execute(query)
         avg_val = result.scalar_one_or_none()
         return float(avg_val) if avg_val is not None else None
+
+    async def count_by_film_id(
+        self,
+        session: AsyncSession,
+        film_id: uuid.UUID,
+    ) -> int:
+        """
+        Count total reviews for a specific film.
+        """
+        query = select(func.count(Review.id)).where(Review.film_id == film_id)
+        result = await session.execute(query)
+        return result.scalar_one() or 0
 
     async def create(
         self,
@@ -260,6 +395,10 @@ async def get_by_film_id(
 
 async def average_rating(db: AsyncSession, film_id: uuid.UUID) -> float | None:
     return await default_review_dao.average_rating(session=db, film_id=film_id)
+
+
+async def count_by_film_id(db: AsyncSession, film_id: uuid.UUID) -> int:
+    return await default_review_dao.count_by_film_id(session=db, film_id=film_id)
 
 
 async def get_reviews_with_details(

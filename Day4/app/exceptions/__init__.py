@@ -19,10 +19,13 @@ from app.exceptions.handlers import (
     register_exception_handlers,
 )
 from app.exceptions.review import (
+    DuplicateReviewError,
     InvalidReviewRatingError,
     ReviewAlreadyExistsError,
     ReviewNotFoundError,
     ReviewPermissionDeniedError,
+    UnauthorizedReviewDeleteError,
+    UnauthorizedReviewUpdateError,
 )
 from app.exceptions.user import (
     InvalidCredentialsError,
@@ -46,7 +49,10 @@ __all__ = [
     "FilmAlreadyExistsError",
     "ReviewNotFoundError",
     "ReviewAlreadyExistsError",
+    "DuplicateReviewError",
     "ReviewPermissionDeniedError",
+    "UnauthorizedReviewUpdateError",
+    "UnauthorizedReviewDeleteError",
     "InvalidReviewRatingError",
     "UserNotFoundError",
     "UserAlreadyExistsError",

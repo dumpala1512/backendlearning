@@ -17,6 +17,14 @@ from app.exceptions.review import (
 )
 from app.models.review import Review, ReviewORM
 
+from datetime import datetime
+import math
+from app.schemas.review import (
+    PaginatedReviewResponse,
+    ReviewFilterQuery,
+    ReviewResponse,
+)
+
 logger = logging.getLogger("review_service")
 
 
@@ -44,12 +52,78 @@ class ReviewService:
         self.dao = dao
         self.film_dao = film_dao
 
+    async def list_reviews_paginated(
+        self,
+        session: AsyncSession,
+        film_id: uuid.UUID,
+        min_rating: int | None = None,
+        max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = 1,
+        limit: int = 10,
+        page_size: int | None = None,
+        filters: ReviewFilterQuery | None = None,
+    ) -> PaginatedReviewResponse:
+        """
+        Retrieve reviews for a film with offset-based pagination and dynamic filtering.
+        Validates film exists and raises FilmNotFoundError if not found.
+        Standardized on `limit` with `page_size` alias.
+        """
+        film = await self.film_dao.get_by_id(session, film_id)
+        if film is None:
+            raise FilmNotFoundError(film_id=film_id)
+
+        effective_limit = page_size if page_size is not None else limit
+        if filters is not None:
+            min_rating = filters.min_rating if min_rating is None else min_rating
+            max_rating = filters.max_rating if max_rating is None else max_rating
+            reviewer = filters.reviewer if reviewer is None else reviewer
+            username = filters.username if username is None else username
+            date_from = filters.date_from if date_from is None else date_from
+            date_to = filters.date_to if date_to is None else date_to
+            page = filters.page
+            effective_limit = filters.limit if filters.limit is not None else (filters.page_size or effective_limit)
+
+        reviews, total = await self.dao.list_reviews_paginated(
+            session=session,
+            film_id=film_id,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            reviewer=reviewer,
+            username=username,
+            date_from=date_from,
+            date_to=date_to,
+            page=page,
+            limit=effective_limit,
+        )
+        total_pages = math.ceil(total / effective_limit) if total > 0 else 0
+        validated_reviews = [ReviewResponse.model_validate(r) for r in reviews]
+
+        return PaginatedReviewResponse(
+            page=page,
+            limit=effective_limit,
+            total=total,
+            total_pages=total_pages,
+            total_records=total,
+            items=validated_reviews,
+            reviews=validated_reviews,
+        )
+
     async def list_reviews(
         self,
         session: AsyncSession,
         film_id: uuid.UUID,
         min_rating: int | None = None,
         max_rating: int | None = None,
+        reviewer: str | None = None,
+        username: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Review]:
         """
         Retrieve reviews for a film, ensuring the film exists and is active.
@@ -63,6 +137,12 @@ class ReviewService:
             film_id=film_id,
             min_rating=min_rating,
             max_rating=max_rating,
+            reviewer=reviewer,
+            username=username,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
         )
 
     async def average_rating(

@@ -13,5 +13,23 @@ DEBUG: bool = False
 # Static CORS Configuration
 ALLOWED_CORS_ORIGINS: list[str] = [
     "http://localhost:3000",
-    "http://localhost:8000",
+    "http://127.0.0.1:3000",
+]
+CORS_ALLOWED_METHODS: list[str] = [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+]
+CORS_ALLOWED_HEADERS: list[str] = [
+    "Content-Type",
+    "Authorization",
+    "X-Request-ID",
+    "Accept",
+]
+CORS_EXPOSE_HEADERS: list[str] = [
+    "X-Request-ID",
+    "X-Process-Time",
 ]

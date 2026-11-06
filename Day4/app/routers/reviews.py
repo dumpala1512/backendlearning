@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import project_config
@@ -16,8 +16,16 @@ from app.dependencies import (
 from app.exceptions.base import PermissionDeniedError, ValidationError
 from app.exceptions.review import ReviewPermissionDeniedError
 from app.schemas.common import MessageResponse
-from app.schemas.review import RatingRangeFilter, ReviewCreate, ReviewResponse, ReviewUpdate
+from app.schemas.review import (
+    PaginatedReviewResponse,
+    RatingRangeFilter,
+    ReviewCreate,
+    ReviewFilterQuery,
+    ReviewResponse,
+    ReviewUpdate,
+)
 from app.schemas.user import AuthenticatedUser
+from app.services.film_service import recalculate_film_stats_task
 from app.services.review_service import ReviewService
 
 logger = logging.getLogger("film_review.routers.reviews")
@@ -27,39 +35,30 @@ router = APIRouter(tags=["Reviews"], dependencies=[Depends(get_current_user)])
 
 @router.get(
     "/films/{film_id}/reviews",
-    response_model=list[ReviewResponse],
-    summary="Get reviews for a film",
+    response_model=PaginatedReviewResponse,
+    summary="Get reviews for a film with pagination and dynamic filtering",
 )
 async def get_film_reviews(
     film_id: uuid.UUID,
-    min_rating: int | None = Query(None, ge=1, le=10, description="Minimum rating filter"),
-    max_rating: int | None = Query(None, ge=1, le=10, description="Maximum rating filter"),
+    filters: ReviewFilterQuery = Depends(),
     service: ReviewService = Depends(get_review_service),
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
-) -> list[ReviewResponse]:
+) -> PaginatedReviewResponse:
     """
-    Retrieve all reviews for a specific film with optional rating range filtering.
+    Retrieve paginated reviews for a specific film with dynamic multi-field filtering.
     Follows: Route -> Service -> DAO -> AsyncSession -> Database.
     """
     logger.info(
-        f"[{request_id}] get_film_reviews(film_id={film_id}) | API {project_config.API_VERSION} | "
-        f"DB active={db.is_active}"
+        f"[{request_id}] get_film_reviews(film_id={film_id}) | "
+        f"filters={filters.model_dump(exclude_none=True)} | DB active={db.is_active}"
     )
 
-    if min_rating is not None or max_rating is not None:
-        RatingRangeFilter(
-            min_rating=min_rating if min_rating is not None else 1,
-            max_rating=max_rating if max_rating is not None else 10,
-        )
-
-    reviews = await service.list_reviews(
+    return await service.list_reviews_paginated(
         session=db,
         film_id=film_id,
-        min_rating=min_rating,
-        max_rating=max_rating,
+        filters=filters,
     )
-    return [ReviewResponse.model_validate(r) for r in reviews]
 
 
 @router.get(
@@ -90,6 +89,7 @@ async def get_film_average_rating(
 async def create_review(
     film_id: uuid.UUID,
     payload: ReviewCreate,
+    background_tasks: BackgroundTasks,
     current_user: AuthenticatedUser = Depends(get_current_user),
     service: ReviewService = Depends(get_review_service),
     db: AsyncSession = Depends(get_db),
@@ -108,7 +108,7 @@ async def create_review(
         )
 
     # Route-layer RBAC: Critics can only create reviews under their own identity
-    author_id = payload.user_id
+    author_id = payload.user_id or current_user.id
     if current_user.role != "admin" and payload.user_id is not None and payload.user_id != current_user.id:
         raise PermissionDeniedError(
             message="Critics can only create reviews under their own user identity.",
@@ -124,6 +124,11 @@ async def create_review(
         reviewer_display_name=payload.reviewer_display_name,
         user_id=author_id,
     )
+    logger.info(f"[Request ID: {request_id}] Review created successfully")
+
+    # Schedule background task to recalculate film stats without blocking response
+    background_tasks.add_task(recalculate_film_stats_task, film_id)
+
     return ReviewResponse.model_validate(review)
 
 
@@ -136,6 +141,7 @@ async def create_review(
 )
 async def create_review_direct(
     payload: ReviewCreate,
+    background_tasks: BackgroundTasks,
     current_user: AuthenticatedUser = Depends(get_current_user),
     service: ReviewService = Depends(get_review_service),
     db: AsyncSession = Depends(get_db),
@@ -148,7 +154,7 @@ async def create_review_direct(
     )
 
     # Route-layer RBAC: Critics can only create reviews under their own identity
-    author_id = payload.user_id
+    author_id = payload.user_id or current_user.id
     if current_user.role != "admin" and payload.user_id is not None and payload.user_id != current_user.id:
         raise PermissionDeniedError(
             message="Critics can only create reviews under their own user identity.",
@@ -164,6 +170,11 @@ async def create_review_direct(
         reviewer_display_name=payload.reviewer_display_name,
         user_id=author_id,
     )
+    logger.info(f"[Request ID: {request_id}] Review created successfully")
+
+    # Schedule background task to recalculate film stats without blocking response
+    background_tasks.add_task(recalculate_film_stats_task, payload.film_id)
+
     return ReviewResponse.model_validate(review)
 
 

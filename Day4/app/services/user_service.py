@@ -172,6 +172,14 @@ class UserService:
                 user_key = f"user_refresh_tokens:{user.id}"
                 existing = await self.redis_service.get(user_key)
                 tokens_list = existing if isinstance(existing, list) else ([existing] if existing else [])
+
+                # Cap active refresh tokens to at most 5 per user, evicting the oldest
+                max_sessions = 5
+                while len(tokens_list) >= max_sessions:
+                    old_token = tokens_list.pop(0)
+                    await self.redis_service.delete(f"refresh_token:{old_token}")
+                    logger.info("Evicted older refresh token session for user %s", user.id)
+
                 tokens_list.append(refresh_token)
                 await self.redis_service.set(user_key, tokens_list, ttl=ttl)
 
@@ -226,10 +234,10 @@ class UserService:
             }
         )
 
-    async def logout(self, user_id: uuid.UUID) -> None:
+    async def logout(self, user_id: uuid.UUID, session_key: str | None = None) -> None:
         """
-        Revoke the user's refresh token(s) from Redis.
-        Ensures deleted refresh tokens cannot be used to refresh access tokens.
+        Revoke the user's session and refresh token(s) from Redis.
+        Ensures deleted session / refresh tokens cannot be used to refresh access tokens.
         """
         if not self.redis_service:
             logger.warning(
@@ -237,6 +245,10 @@ class UserService:
                 user_id,
             )
             return
+
+        # Invalidate specific session key (or default session:{user_id})
+        key_to_delete = session_key or f"session:{user_id}"
+        await self.redis_service.delete(key_to_delete)
 
         try:
             user_key = f"user_refresh_tokens:{user_id}"
