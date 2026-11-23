@@ -13,11 +13,6 @@ from app.exceptions.film import (
     FilmHasActiveReviewsError,
     FilmNotFoundError,
 )
-from app.exceptions.handlers import (
-    EXCEPTION_STATUS_MAPPINGS,
-    create_error_response,
-    register_exception_handlers,
-)
 from app.exceptions.review import (
     DuplicateReviewError,
     InvalidReviewRatingError,
@@ -65,4 +60,16 @@ __all__ = [
     "create_error_response",
     "register_exception_handlers",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"EXCEPTION_STATUS_MAPPINGS", "create_error_response", "register_exception_handlers"}:
+        from app.exceptions.handlers import EXCEPTION_STATUS_MAPPINGS, create_error_response, register_exception_handlers
+
+        if name == "EXCEPTION_STATUS_MAPPINGS":
+            return EXCEPTION_STATUS_MAPPINGS
+        if name == "create_error_response":
+            return create_error_response
+        return register_exception_handlers
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

@@ -15,6 +15,8 @@ import json
 import urllib.error
 import urllib.request
 
+from app.core.config import settings
+
 BASE_URL = "http://localhost:8000"
 
 
@@ -48,28 +50,28 @@ def main() -> None:
     _, admin_login = send_request(
         "/api/v1/login",
         method="POST",
-        payload={"username": "admin_sarah", "password": "AdminPass123!"},
+        payload={"username": "admin_sarah", "password": settings.SEED_ADMIN_PASSWORD},
     )
     admin_token = admin_login["access_token"]
 
     _, critic_login = send_request(
         "/api/v1/login",
         method="POST",
-        payload={"username": "marcus_reviews", "password": "CriticPass123!"},
+        payload={"username": "marcus_reviews", "password": settings.SEED_MARCUS_CRITIC_PASSWORD},
     )
     critic_token = critic_login["access_token"]
 
     _, viewer_login = send_request(
         "/api/v1/login",
         method="POST",
-        payload={"username": "lucas_viewer", "password": "ViewerPass123!"},
+        payload={"username": "alex_viewer", "password": settings.SEED_ALEX_VIEWER_PASSWORD},
     )
     viewer_token = viewer_login["access_token"]
 
     print("\n[+] Tokens successfully generated:")
     print(f"  * Admin token (admin_sarah): {admin_token[:20]}...")
     print(f"  * Critic token (marcus_reviews): {critic_token[:20]}...")
-    print(f"  * Viewer token (lucas_viewer): {viewer_token[:20]}...\n")
+    print(f"  * Viewer token (alex_viewer): {viewer_token[:20]}...\n")
 
     # ---------------------------------------------------------
     # 1. ADMIN ROLE VERIFICATION

@@ -113,8 +113,12 @@ async def client(
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_redis_client] = lambda: fake_redis
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    # Prevent lifespan from attempting to connect to real external Redis during integration tests
+    from unittest.mock import AsyncMock, patch
+    with patch("app.core.lifespan.init_redis", new_callable=AsyncMock), \
+         patch("app.core.lifespan.close_redis", new_callable=AsyncMock):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
     app.dependency_overrides.clear()

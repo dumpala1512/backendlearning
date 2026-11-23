@@ -29,6 +29,15 @@ from app.exceptions.user import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
+from app.storage.exceptions import (
+    BucketNotFoundError,
+    DeleteFailedError,
+    FileNotFoundError,
+    StorageError,
+    StoragePermissionDenied,
+    StorageValidationError,
+    UploadFailedError,
+)
 
 logger = logging.getLogger("app.exceptions")
 
@@ -47,6 +56,13 @@ EXCEPTION_STATUS_MAPPINGS: dict[type[DomainError], int] = {
     InvalidCredentialsError: status.HTTP_401_UNAUTHORIZED,
     AuthenticationError: status.HTTP_401_UNAUTHORIZED,
     InvalidReviewRatingError: status.HTTP_400_BAD_REQUEST,
+    StoragePermissionDenied: status.HTTP_403_FORBIDDEN,
+    StorageValidationError: status.HTTP_400_BAD_REQUEST,
+    BucketNotFoundError: status.HTTP_404_NOT_FOUND,
+    FileNotFoundError: status.HTTP_404_NOT_FOUND,
+    DeleteFailedError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    UploadFailedError: status.HTTP_502_BAD_GATEWAY,
+    StorageError: status.HTTP_500_INTERNAL_SERVER_ERROR,
     ValidationError: status.HTTP_400_BAD_REQUEST,
 }
 

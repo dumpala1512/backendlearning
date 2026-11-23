@@ -9,16 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.film_dao import FilmDAO
 from app.dao.review_dao import ReviewDAO
+from app.dao.user_dao import UserDAO
+from app.events.publisher import EventPublisher, LocalQueuePublisher
 from app.exceptions.film import FilmNotFoundError
 from app.exceptions.review import (
     ReviewAlreadyExistsError,
     ReviewNotFoundError,
     ReviewPermissionDeniedError,
 )
+from app.exceptions.user import UserNotFoundError
 from app.models.review import Review, ReviewORM
 
-from datetime import datetime
+from datetime import datetime, timezone
 import math
+from app.schemas.event import EventMessage
 from app.schemas.review import (
     PaginatedReviewResponse,
     ReviewFilterQuery,
@@ -48,9 +52,13 @@ class ReviewService:
         self,
         dao: ReviewDAO = Depends(get_review_dao),
         film_dao: FilmDAO = Depends(get_film_dao),
+        event_publisher: EventPublisher | None = None,
+        user_dao: UserDAO | None = None,
     ):
         self.dao = dao
         self.film_dao = film_dao
+        self.event_publisher = event_publisher or LocalQueuePublisher()
+        self.user_dao = user_dao or UserDAO()
 
     async def list_reviews_paginated(
         self,
@@ -176,6 +184,9 @@ class ReviewService:
         if film is None:
             raise FilmNotFoundError(film_id=film_id)
 
+        if user_id is not None and await self.user_dao.get_by_id(session, user_id) is None:
+            raise UserNotFoundError(user_id=user_id)
+
         # Enforce Rule 1: A user may submit only one review per film
         if user_id is not None:
             existing_review = await self.dao.get_by_film_and_user(
@@ -211,6 +222,34 @@ class ReviewService:
             extra={"review_id": str(new_review.id), "film_id": str(film_id)},
         )
         return new_review
+
+    def build_event(self, event_type: str, resource_id: str | uuid.UUID) -> EventMessage:
+        """Create a minimal event payload for downstream consumers."""
+        timestamp = datetime.now(timezone.utc)
+        return EventMessage(
+            event_type=event_type,
+            resource_id=str(resource_id),
+            timestamp=timestamp,
+            version=1,
+        )
+
+    async def publish_review_event(self, event_type: str, resource_id: str | uuid.UUID) -> None:
+        """Publish a review lifecycle event asynchronously without blocking the request."""
+        event = self.build_event(event_type=event_type, resource_id=resource_id)
+        try:
+            self.event_publisher.publish(event)
+            logger.info(
+                "Published event\n\nEvent Type: %s\n\nResource ID: %s",
+                event.event_type,
+                event.resource_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to publish event\n\nEvent Type: %s\n\nResource ID: %s\n\nReason: %s",
+                event.event_type,
+                event.resource_id,
+                str(exc),
+            )
 
     async def get_by_id(
         self,

@@ -29,10 +29,8 @@ wheels/
 # Secrets and environment files
 .env
 .env.*
-!.env.example
 
 # Test outputs and caches
-tests/
 .pytest_cache/
 .coverage
 .coverage.*

@@ -90,20 +90,20 @@ class UserLoginRequest(AppBaseModel):
         "json_schema_extra": {
             "example": {
                 "email_or_username": "bob@example.com",
-                "password": "CanWeFixIt123!",
+                "password": "your-password",
             },
             "examples": [
                 {
                     "email_or_username": "bob@example.com",
-                    "password": "CanWeFixIt123!",
+                    "password": "your-password",
                 },
                 {
                     "username": "bob_builder",
-                    "password": "CanWeFixIt123!",
+                    "password": "your-password",
                 },
                 {
                     "email": "bob@example.com",
-                    "password": "CanWeFixIt123!",
+                    "password": "your-password",
                 },
             ],
         }

@@ -163,11 +163,16 @@ Fully typed models using modern SQLAlchemy 2.0 `Mapped`, `mapped_column`, and `r
 ### Option B: Docker Compose (PostgreSQL + API)
 
 ```bash
+# Start Floci on localhost:4566 first, then start the application stack.
+# Compose initializes the Floci secret, S3 bucket, and SQS queue before the API.
 docker compose up --build
 ```
 This boots:
 - `film-review-db-day4`: PostgreSQL 16 on port 5432 with health check.
 - `film-review-platform-day4`: FastAPI backend on port 8000 connected to the PostgreSQL container.
+- `film-review-redis-day4`: Redis on port 6379.
+
+Floci is used as the AWS-compatible local endpoint at `http://localhost:4566`; start it separately (for example with the Floci CLI or its own Docker Compose project). The application Compose project runs `scripts/init_floci.py` as a one-shot service, creating or updating the secret, S3 bucket, and SQS queue before the API starts. The API requires the SQS queue to be reachable and fails startup or event delivery rather than falling back to an in-memory queue. The script does not print secret contents. Set `POSTGRES_PASSWORD` and `LOCAL_TOKEN_SECRET_KEY` in `.env`; Compose mounts the database password as a secret rather than an environment variable. No AWS account is required for local development. In Compose, `AWS_ENDPOINT_URL` is the API container's Floci address, while `S3_PRESIGNED_ENDPOINT_URL` is the browser-reachable address embedded in generated download links. Compose sets the latter to `http://localhost:4566` for local browser access; use a client-reachable hostname if accessing the app from another machine.
 
 ---
 
@@ -218,6 +223,50 @@ Seed data is an independent, application-level concern and is strictly decoupled
 ```bash
 uv run python scripts/seed.py
 ```
+
+---
+
+## ☁️ S3 Storage Layer
+
+The backend now includes a dedicated storage abstraction under `app/storage/` to isolate all S3 interactions behind a single `StorageService`.
+
+### Responsibilities
+- `StorageService` owns the boto3 client lifecycle and all S3 operations.
+- Route handlers only inject and await the service.
+- AWS exceptions are translated into domain exceptions before they reach HTTP handlers.
+- File upload/download operations keep the async boundary inside the service via `asyncio.to_thread()`.
+
+### Configuration
+The centralized `Settings` class includes:
+- `S3_BUCKET_NAME`
+- `S3_ENDPOINT_URL`
+- `S3_PRESIGNED_ENDPOINT_URL` (optional; hostname embedded in generated URLs)
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `S3_SIGNATURE_VERSION`
+- `PRESIGNED_URL_EXPIRE_SECONDS`
+
+### Endpoints
+- `POST /api/v1/storage/upload` uploads a file to S3 and returns a stable key-based identifier.
+- `POST /api/v1/storage/presign-upload` returns a short-lived PUT URL; it does not upload the file itself.
+- `GET /api/v1/storage` lists objects under an optional prefix.
+- `GET /api/v1/storage/{object_key}` streams the stored file with `Content-Disposition: attachment`.
+- `DELETE /api/v1/storage/{object_key}` removes the object.
+- `POST /api/v1/storage/presign` creates a temporary URL for the requested S3 operation (`get_object` by default; `put_object` for uploads).
+
+New uploads store `Content-Disposition: inline`, allowing image-capable object viewers to display them. API downloads still default to attachment; use `?content_disposition=inline` on the direct download route or `content_disposition=inline` on the presign endpoint to render in a browser. Existing objects keep their old metadata, but the presign response override can still display them inline.
+
+To upload directly to object storage, request a presigned URL from `/api/v1/storage/presign-upload` with the filename, MIME type, and exact file size. The response includes `http_method` (`PUT`), the `object_key`, URL, required headers, and expiry. The file is stored only after the client sends the raw file bytes with HTTP `PUT` to that URL using the returned `Content-Type` and `Content-Disposition` headers. The successful PUT response means the object was stored. Use the exact returned `object_key` to download it or check it in `GET /api/v1/storage?prefix=uploads`. The URL signs the expected file size. Browser clients must not set `Content-Length` manually; the browser supplies it from the file body. Configure `S3_CORS_ALLOWED_ORIGINS` and rerun `scripts/init_floci.py` to enable browser PUTs to Floci. The generic `/presign` endpoint also accepts `operation=put_object` plus `content_type` and `file_size`; otherwise it generates a download URL.
+
+Downloads were previously displayed inline because the response used the object MIME type (for example, `image/png`) without an attachment disposition. The download route and presigned GET now set `Content-Disposition: attachment`, which asks the browser to download the object instead of previewing it.
+
+### Validation and Startup
+- startup validation checks the target bucket is reachable with valid credentials
+- uploads enforce empty-file and MIME checks when configured
+- invalid object keys and unsupported operations raise descriptive domain errors
+
+This component is designed to be reusable for review attachments, posters, exported reports, and future object-backed features without leaking AWS logic into business services or routes.
+
 
 ### Key Guarantees:
 - **Idempotency**: Running `scripts/seed.py` once or ten times produces the exact same final database state with zero duplicates.

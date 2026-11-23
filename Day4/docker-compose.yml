@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: film_user
-      POSTGRES_PASSWORD: film_secret_pass
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: film_review_db
+    secrets:
+      - postgres_password
     ports:
       - "5432:5432"
     volumes:
@@ -37,7 +39,22 @@ services:
     networks:
       - film-review-net
 
+  floci-init:
+    image: film-review-platform-day4:local
+    entrypoint: ["python", "scripts/init_floci.py"]
+    command: []
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - AWS_ENDPOINT_URL=http://host.docker.internal:4566
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - film-review-net
+
   api:
+    image: film-review-platform-day4:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -45,28 +62,37 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql+asyncpg://film_user:film_secret_pass@db:5432/film_review_db
+      - AWS_ENDPOINT_URL=http://host.docker.internal:4566
+      - EVENT_QUEUE_URL=http://host.docker.internal:4566/000000000000/film-review-queue
+      - EVENT_PUBLISHER_ENABLED=true
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=film_user
+      - DB_NAME=film_review_db
+      - DB_DRIVER=postgresql+asyncpg
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - TOKEN_SECRET_KEY=film-review-platform-super-secret-signing-key-day4-2026-secure
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - REFRESH_TOKEN_EXPIRE_DAYS=7
-      - CACHE_TTL_SECONDS=300
-      - LOG_LEVEL=INFO
+      - REDIS_DB=0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      floci-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\")' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 60s
     networks:
       - film-review-net
 
@@ -100,6 +126,10 @@ volumes:
     driver: local
   redis_data_day4:
     driver: local
+
+secrets:
+  postgres_password:
+    environment: POSTGRES_PASSWORD
 
 networks:
   film-review-net:

@@ -17,11 +17,26 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Set API URL for browser interactions at build time
+# Set environment variables for safety gate and Next.js compilation
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG PORT=3000
+ENV PORT=$PORT
+ARG NODE_ENV=production
+ENV NODE_ENV=$NODE_ENV
 
-RUN npm run build
+# Allow skipping the live network probe during isolated Docker image builds
+ARG SKIP_BACKEND_HEALTH_CHECK=true
+ENV SKIP_BACKEND_HEALTH_CHECK=$SKIP_BACKEND_HEALTH_CHECK
+
+# Step 2: Run pre-deployment safety gate (environment validation & backend health check)
+RUN node scripts/pre-deployment.js
+
+# Step 3: Run the complete frontend test suite (Vitest)
+RUN npm test
+
+# Step 4: Execute Next.js build
+RUN npx next build
 
 # ==============================================================================
 # Stage 3: Minimal production runtime
@@ -42,6 +57,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 
 USER nextjs
 EXPOSE 3000

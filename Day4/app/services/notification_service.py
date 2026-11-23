@@ -4,6 +4,8 @@ import logging
 from typing import Any
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger("film_review.services.notification")
 
 
@@ -12,15 +14,16 @@ class NotificationService:
     Third-party external notification service.
     Sends notifications (email/webhook/SMS) via an external HTTP REST API.
     Used to demonstrate mocking external asynchronous HTTP dependencies and third-party APIs.
+    All third-party credentials (API keys) are retrieved from AWS Secrets Manager.
     """
 
     def __init__(
         self,
         api_url: str = "https://api.notifications.example.com",
-        api_key: str = "secret-external-api-key",
+        api_key: str | None = None,
     ) -> None:
         self.api_url = api_url.rstrip("/")
-        self.api_key = api_key
+        self.api_key = api_key if api_key is not None else settings.NOTIFICATION_API_KEY
 
     async def send_review_notification(
         self,
@@ -32,6 +35,9 @@ class NotificationService:
         Send external notification when a new film review is submitted.
         Must be mocked during tests so no actual network request occurs.
         """
+        if not self.api_key:
+            raise RuntimeError("Notification API key is not configured.")
+
         url = f"{self.api_url}/v1/notifications/review"
         headers = {
             "Authorization": f"Bearer {self.api_key}",

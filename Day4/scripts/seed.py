@@ -71,7 +71,14 @@ logger = logging.getLogger("seed")
 # Baseline Seed Data Definitions
 # ==============================================================================
 
+from app.core.config import settings
 from app.core.security import hash_password
+
+
+def _seed_password(value: str | None, setting_name: str) -> str:
+    if not value:
+        raise RuntimeError(f"{setting_name} must be configured to seed developer accounts.")
+    return value
 
 SEED_USERS = [
     {
@@ -79,35 +86,43 @@ SEED_USERS = [
         "full_name": "Sarah Connor",
         "email": "sarah.admin@filmcritic.org",
         "role": "admin",
-        "hashed_password": hash_password("AdminPass123!"),
+        "hashed_password": hash_password(_seed_password(settings.SEED_ADMIN_PASSWORD, "SEED_ADMIN_PASSWORD")),
     },
     {
         "username": "marcus_reviews",
         "full_name": "Marcus Vance",
         "email": "marcus.critic@filmjournal.com",
         "role": "critic",
-        "hashed_password": hash_password("CriticPass123!"),
+        "hashed_password": hash_password(
+            _seed_password(settings.SEED_MARCUS_CRITIC_PASSWORD, "SEED_MARCUS_CRITIC_PASSWORD")
+        ),
     },
     {
         "username": "elena_cinephile",
         "full_name": "Elena Rostova",
         "email": "elena.member@movielovers.net",
         "role": "viewer",
-        "hashed_password": hash_password("MemberPass123!"),
+        "hashed_password": hash_password(
+            _seed_password(settings.SEED_ELENA_VIEWER_PASSWORD, "SEED_ELENA_VIEWER_PASSWORD")
+        ),
     },
     {
         "username": "alex_viewer",
         "full_name": "Alex Mercer",
         "email": "alex.viewer@streamguide.io",
         "role": "viewer",
-        "hashed_password": hash_password("UserPass123!"),
+        "hashed_password": hash_password(
+            _seed_password(settings.SEED_ALEX_VIEWER_PASSWORD, "SEED_ALEX_VIEWER_PASSWORD")
+        ),
     },
     {
         "username": "bob_builder",
         "full_name": "Bob The Builder",
         "email": "bob@example.com",
         "role": "critic",
-        "hashed_password": hash_password("CanWeFixIt123!"),
+        "hashed_password": hash_password(
+            _seed_password(settings.SEED_BOB_CRITIC_PASSWORD, "SEED_BOB_CRITIC_PASSWORD")
+        ),
     },
 ]
 

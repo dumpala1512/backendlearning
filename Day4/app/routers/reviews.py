@@ -126,56 +126,56 @@ async def create_review(
     )
     logger.info(f"[Request ID: {request_id}] Review created successfully")
 
-    # Schedule background task to recalculate film stats without blocking response
+    background_tasks.add_task(service.publish_review_event, "ReviewCreated", review.id)
     background_tasks.add_task(recalculate_film_stats_task, film_id)
 
     return ReviewResponse.model_validate(review)
 
 
-@router.post(
-    "/reviews",
-    response_model=ReviewResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a review",
-    dependencies=[Depends(get_current_user), Depends(require_role("critic"))],
-)
-async def create_review_direct(
-    payload: ReviewCreate,
-    background_tasks: BackgroundTasks,
-    current_user: AuthenticatedUser = Depends(get_current_user),
-    service: ReviewService = Depends(get_review_service),
-    db: AsyncSession = Depends(get_db),
-    request_id: str = Depends(get_request_id),
-) -> ReviewResponse:
-    """Submit a review directly via ReviewCreate payload (Critics and Admins only)."""
-    logger.info(
-        f"[{request_id}] create_review_direct for film_id={payload.film_id} | "
-        f"user={current_user.username} | DB active={db.is_active}"
-    )
+# @router.post(
+#     "/reviews",
+#     response_model=ReviewResponse,
+#     status_code=status.HTTP_201_CREATED,
+#     summary="Create a review",
+#     dependencies=[Depends(get_current_user), Depends(require_role("critic"))],
+# )
+# async def create_review_direct(
+#     payload: ReviewCreate,
+#     background_tasks: BackgroundTasks,
+#     current_user: AuthenticatedUser = Depends(get_current_user),
+#     service: ReviewService = Depends(get_review_service),
+#     db: AsyncSession = Depends(get_db),
+#     request_id: str = Depends(get_request_id),
+# ) -> ReviewResponse:
+#     """Submit a review directly via ReviewCreate payload (Critics and Admins only)."""
+#     logger.info(
+#         f"[{request_id}] create_review_direct for film_id={payload.film_id} | "
+#         f"user={current_user.username} | DB active={db.is_active}"
+#     )
 
-    # Route-layer RBAC: Critics can only create reviews under their own identity
-    author_id = payload.user_id or current_user.id
-    if current_user.role != "admin" and payload.user_id is not None and payload.user_id != current_user.id:
-        raise PermissionDeniedError(
-            message="Critics can only create reviews under their own user identity.",
-            detail={"user_id": str(current_user.id), "payload_user_id": str(payload.user_id)},
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
+#     # Route-layer RBAC: Critics can only create reviews under their own identity
+#     author_id = payload.user_id or current_user.id
+#     if current_user.role != "admin" and payload.user_id is not None and payload.user_id != current_user.id:
+#         raise PermissionDeniedError(
+#             message="Critics can only create reviews under their own user identity.",
+#             detail={"user_id": str(current_user.id), "payload_user_id": str(payload.user_id)},
+#             status_code=status.HTTP_403_FORBIDDEN,
+#         )
 
-    review = await service.add_review(
-        session=db,
-        film_id=payload.film_id,
-        rating=payload.rating,
-        review=payload.review,
-        reviewer_display_name=payload.reviewer_display_name,
-        user_id=author_id,
-    )
-    logger.info(f"[Request ID: {request_id}] Review created successfully")
+#     review = await service.add_review(
+#         session=db,
+#         film_id=payload.film_id,
+#         rating=payload.rating,
+#         review=payload.review,
+#         reviewer_display_name=payload.reviewer_display_name,
+#         user_id=author_id,
+#     )
+#     logger.info(f"[Request ID: {request_id}] Review created successfully")
 
-    # Schedule background task to recalculate film stats without blocking response
-    background_tasks.add_task(recalculate_film_stats_task, payload.film_id)
+#     background_tasks.add_task(service.publish_review_event, "ReviewCreated", review.id)
+#     background_tasks.add_task(recalculate_film_stats_task, payload.film_id)
 
-    return ReviewResponse.model_validate(review)
+#     return ReviewResponse.model_validate(review)
 
 
 @router.patch(
@@ -187,6 +187,7 @@ async def create_review_direct(
 async def update_review(
     review_id: uuid.UUID,
     payload: ReviewUpdate,
+    background_tasks: BackgroundTasks,
     x_user_id: uuid.UUID | None = Header(None, alias="X-User-Id"),
     current_user: AuthenticatedUser = Depends(get_current_user),
     service: ReviewService = Depends(get_review_service),
@@ -216,6 +217,7 @@ async def update_review(
         is_admin=is_admin,
         **updates,
     )
+    background_tasks.add_task(service.publish_review_event, "ReviewUpdated", review.id)
     return ReviewResponse.model_validate(review)
 
 

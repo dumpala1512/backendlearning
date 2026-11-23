@@ -1,0 +1,41 @@
+{
+  "name": "@dumpala1512/env-validator",
+  "version": "1.0.0",
+  "description": "Robust, zero-dependency environment variable validator and schema parser with dual ESM and CommonJS support.",
+  "license": "MIT",
+  "author": "prasad <dumpala1512@gmail.com>",
+  "keywords": [
+    "environment",
+    "validator",
+    "schema",
+    "configuration",
+    "typescript",
+    "esm",
+    "cjs"
+  ],
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"const fs = require('fs'); if (fs.existsSync('dist')) fs.rmSync('dist', { recursive: true, force: true });\"",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/validator.test.mjs test/cjs.test.cjs",
+    "test:env": "node --env-file=.env test-env.js",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

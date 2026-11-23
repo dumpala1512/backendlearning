@@ -126,20 +126,20 @@ def custom_openapi():
     if "UserLoginRequest" in schemas:
         schemas["UserLoginRequest"]["example"] = {
             "email_or_username": "bob@example.com",
-            "password": "CanWeFixIt123!",
+            "password": "your-password",
         }
         schemas["UserLoginRequest"]["examples"] = [
             {
                 "email_or_username": "bob@example.com",
-                "password": "CanWeFixIt123!",
+                "password": "your-password",
             },
             {
                 "username": "bob_builder",
-                "password": "CanWeFixIt123!",
+                "password": "your-password",
             },
             {
                 "email": "bob@example.com",
-                "password": "CanWeFixIt123!",
+                "password": "your-password",
             },
         ]
 
@@ -150,28 +150,28 @@ def custom_openapi():
             if "application/json" in content:
                 content["application/json"]["example"] = {
                     "email_or_username": "bob@example.com",
-                    "password": "CanWeFixIt123!",
+                    "password": "your-password",
                 }
                 content["application/json"]["examples"] = {
                     "email_or_username": {
                         "summary": "Email or Username Login",
                         "value": {
                             "email_or_username": "bob@example.com",
-                            "password": "CanWeFixIt123!",
+                            "password": "your-password",
                         },
                     },
                     "username_only": {
                         "summary": "Username Login",
                         "value": {
                             "username": "bob_builder",
-                            "password": "CanWeFixIt123!",
+                            "password": "your-password",
                         },
                     },
                     "email_only": {
                         "summary": "Email Login",
                         "value": {
                             "email": "bob@example.com",
-                            "password": "CanWeFixIt123!",
+                            "password": "your-password",
                         },
                     },
                 }

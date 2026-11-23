@@ -11,9 +11,11 @@ from app.core.database import async_session_factory
 from app.dao.film_dao import FilmDAO
 from app.dao.review_dao import ReviewDAO
 from app.dao.user_dao import UserDAO
+from app.events.publisher import EventPublisher, create_event_publisher
 from app.services.film_service import FilmService
 from app.services.review_service import ReviewService
 from app.services.user_service import UserService
+from app.storage.storage_service import StorageService
 
 # Backwards compatibility alias: DatabaseSession points to SQLAlchemy's AsyncSession
 DatabaseSession = AsyncSession
@@ -85,6 +87,18 @@ def get_redis_service(
     return RedisService(client=client)
 
 
+def get_storage_service(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> StorageService:
+    """Provide a single shared S3 storage service for the application lifecycle."""
+    service = getattr(request.app.state, "storage_service", None)
+    if service is None:
+        service = StorageService(settings=settings)
+        request.app.state.storage_service = service
+    return service
+
+
 # ---------------------------------------------------------------------------
 # Service Dependency Providers
 # ---------------------------------------------------------------------------
@@ -97,12 +111,28 @@ def get_film_service(
     return FilmService(dao=dao, review_dao=review_dao, redis_service=redis_service)
 
 
+def get_event_publisher(request: Request) -> EventPublisher:
+    """Provide an application-scoped event publisher implementation."""
+    publisher = getattr(request.app.state, "event_publisher", None)
+    if publisher is None:
+        publisher = create_event_publisher(settings)
+        request.app.state.event_publisher = publisher
+    return publisher
+
+
 def get_review_service(
     dao: ReviewDAO = Depends(get_review_dao),
     film_dao: FilmDAO = Depends(get_film_dao),
+    event_publisher: EventPublisher = Depends(get_event_publisher),
+    user_dao: UserDAO = Depends(get_user_dao),
 ) -> ReviewService:
-    """Provide ReviewService with injected ReviewDAO and FilmDAO."""
-    return ReviewService(dao=dao, film_dao=film_dao)
+    """Provide ReviewService with injected ReviewDAO, FilmDAO, and event publisher."""
+    return ReviewService(
+        dao=dao,
+        film_dao=film_dao,
+        event_publisher=event_publisher,
+        user_dao=user_dao,
+    )
 
 
 def get_user_service(
